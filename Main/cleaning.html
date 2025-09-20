@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KMRL Cleaning Management</title>
+<style>
+  body {font-family: Arial, sans-serif; margin:0; background:#f0f3f5; color:#1a1a1a;}
+  header {background:#1976D2; color:white; padding:1rem; text-align:center; font-weight:700;}
+  main {display:flex; gap:15px; padding:15px;}
+  .card {background:white; border-radius:10px; padding:16px; flex:1; box-shadow:0 2px 8px rgba(0,0,0,0.1);}
+  h2 {margin-top:0; color:#1976D2;}
+  table {width:100%; border-collapse:collapse; margin-top:12px;}
+  th, td {padding:8px; border:1px solid #ddd; text-align:center;}
+  th {background:#f1f3f4; color:#333;}
+  select, input {padding:6px; border-radius:6px; border:1px solid #ccc;}
+  button {padding:6px 12px; border:none; border-radius:6px; cursor:pointer; background:#1976D2; color:white;}
+  .bay-grid {display:grid; grid-template-columns:repeat(6,1fr); gap:8px; margin-top:12px;}
+  .bay {padding:12px; border-radius:6px; border:1px dashed #ccc; text-align:center; font-weight:700;}
+  .bay.occupied {background:#ffe0e0; border:1px solid #f5c2c2; color:#a00000;}
+  .bay.available {background:#e8f5e9; border:1px solid #c8e6c9; color:#2e7d32;}
+</style>
+</head>
+<body>
+
+<header>
+  KMRL Cleaning Management
+</header>
+
+<main>
+  <div class="card">
+    <h2>Trains Assigned for Cleaning</h2>
+    <table id="cleaningTable">
+      <thead>
+        <tr>
+          <th>Train ID</th>
+          <th>Assigned Bay</th>
+          <th>Entry Time</th>
+          <th>Exit Time</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div style="margin-top:12px;">
+      <button onclick="raiseExtraResources()">Raise Extra Resources</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Cleaning Bays</h2>
+    <div class="bay-grid" id="cleaningBays"></div>
+  </div>
+</main>
+
+<script>
+  const cleaningTrains = [
+    {id:'T01', bay:null, entry:'', exit:'', status:'Pending'},
+    {id:'T06', bay:null, entry:'', exit:'', status:'Pending'},
+    {id:'T09', bay:null, entry:'', exit:'', status:'Pending'},
+    {id:'T15', bay:null, entry:'', exit:'', status:'Pending'}
+  ];
+
+  const bays = Array(12).fill(null);
+
+  function renderTable(){
+    const tbody = document.querySelector('#cleaningTable tbody');
+    tbody.innerHTML = '';
+    cleaningTrains.forEach((t,i)=>{
+      const baySelect = `<select onchange="assignBay(${i}, this.value)">
+        <option value="">Select Bay</option>
+        ${bays.map((b,idx)=>`<option value="${idx}" ${t.bay===idx?'selected':''}>Bay ${idx+1} ${b?'(Occupied)':''}</option>`).join('')}
+      </select>`;
+      const entryInput = `<input type="time" value="${t.entry}" onchange="updateEntry(${i}, this.value)">`;
+      const exitInput = `<input type="time" value="${t.exit}" onchange="updateExit(${i}, this.value)">`;
+      const status = t.status;
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${t.id}</td>
+                      <td>${baySelect}</td>
+                      <td>${entryInput}</td>
+                      <td>${exitInput}</td>
+                      <td>${status}</td>
+                      <td><button onclick="markReady(${i})">Ready for Inspection</button></td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderBays(){
+    const grid = document.getElementById('cleaningBays');
+    grid.innerHTML='';
+    bays.forEach((b,i)=>{
+      const div = document.createElement('div');
+      div.className = 'bay ' + (b!==null?'occupied':'available');
+      div.textContent = `Bay ${i+1}` + (b!==null?` — ${b}`:'');
+      grid.appendChild(div);
+    });
+  }
+
+  function assignBay(trainIndex, bayIndex){
+    bayIndex = bayIndex === '' ? null : parseInt(bayIndex);
+    const prevBay = cleaningTrains[trainIndex].bay;
+    if(prevBay!==null) bays[prevBay] = null;
+    if(bayIndex!==null && bays[bayIndex]===null){
+      bays[bayIndex] = cleaningTrains[trainIndex].id;
+      cleaningTrains[trainIndex].bay = bayIndex;
+    } else {
+      cleaningTrains[trainIndex].bay = null;
+    }
+    renderTable();
+    renderBays();
+  }
+
+  function updateEntry(trainIndex, value){
+    cleaningTrains[trainIndex].entry = value;
+    renderTable();
+  }
+
+  function updateExit(trainIndex, value){
+    cleaningTrains[trainIndex].exit = value;
+    renderTable();
+  }
+
+  function markReady(trainIndex){
+    const t = cleaningTrains[trainIndex];
+    if(!t.entry || !t.exit){
+      alert('Please fill entry and exit time!');
+      return;
+    }
+    t.status = 'Ready for Inspection';
+    const bay = t.bay;
+    if(bay!==null) bays[bay] = null;
+    renderTable();
+    renderBays();
+    alert(`${t.id} marked ready for inspection.`);
+  }
+
+  function raiseExtraResources(){
+    alert('Extra cleaning resources requested!');
+  }
+
+  renderTable();
+  renderBays();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>KMRL Admin</title>
+  <style>
+    :root{--bg:#f5f7fa;--card:#ffffff;--muted:#6b7280;--accent:#1976D2;--teal:#26A69A;--success:#43A047;--warn:#FBC02D;--danger:#E53935}
+    *{box-sizing:border-box;font-family:Inter,Roboto,Arial,Helvetica,sans-serif}
+    body{margin:0;background:var(--bg);color:#0f1724}
+    header{height:64px;background:#fff;border-bottom:1px solid #e6edf3;display:flex;align-items:center;gap:16px;padding:0 24px}
+    header h1{font-size:18px;margin:0;color:var(--accent)}
+    .container{display:grid;grid-template-columns:240px 1fr 380px;gap:18px;padding:18px}
+    .sidebar{background:var(--card);border-radius:10px;padding:16px;box-shadow:0 6px 18px rgba(16,24,40,0.03)}
+    .kpi{display:flex;flex-direction:column;gap:12px}
+    .kpi .item{display:flex;justify-content:space-between;align-items:center;padding:12px;border-radius:8px;background:#fbfcfd;border:1px solid #eef4fa}
+    .kpi .item .label{color:var(--muted);font-size:13px}
+    .kpi .item .value{font-weight:700;color:#0b1220}
+
+    .main{display:flex;flex-direction:column;gap:14px}
+    .card{background:var(--card);border-radius:10px;padding:14px;box-shadow:0 6px 18px rgba(16,24,40,0.03)}
+    .filters{display:flex;gap:8px;align-items:center}
+    .filters select,.filters input{padding:8px;border-radius:8px;border:1px solid #d7e6f4;background:#fff}
+
+    table{width:100%;border-collapse:collapse;margin-top:8px}
+    th,td{padding:10px 8px;border-bottom:1px solid #f0f4f8;text-align:left;font-size:13px}
+    th{color:var(--muted);font-weight:600}
+    .chip{display:inline-block;padding:6px 8px;border-radius:999px;font-size:12px}
+    .chip.ok{background:#e6f6ee;color:var(--success);border:1px solid #cfead1}
+    .chip.warn{background:#fff6e5;color:var(--warn);border:1px solid #fde9b7}
+    .chip.bad{background:#fdecea;color:var(--danger);border:1px solid #f6c3c0}
+
+    .right{display:flex;flex-direction:column;gap:14px}
+    .rank-list{display:flex;flex-direction:column;gap:8px;max-height:520px;overflow:auto;padding-right:6px}
+    .train-card{display:flex;justify-content:space-between;align-items:center;padding:12px;border-radius:8px;border:1px solid #eef4f9;background:#fafcff}
+    .train-card .meta{display:flex;gap:12px;align-items:center}
+    .badge{font-size:12px;padding:6px 8px;border-radius:8px}
+    .progress{height:8px;background:#eef8ff;border-radius:6px;overflow:hidden;width:160px}
+    .progress > i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--teal))}
+
+    .drawer{position:fixed;right:18px;top:90px;width:380px;background:var(--card);border-radius:10px;padding:14px;box-shadow:0 20px 50px rgba(16,24,40,0.14);max-height:78vh;overflow:auto}
+    .drawer h3{margin:0 0 6px 0}
+    .reason{display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px;background:#fbfdff;margin-bottom:8px}
+
+    .sim{display:flex;gap:12px;align-items:center}
+    .beforeafter{display:flex;gap:12px}
+    .mini{width:220px;background:#fff;padding:8px;border-radius:8px}
+
+    .grid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+    .bay{height:64px;border-radius:8px;border:1px dashed #dfe9f3;display:flex;align-items:center;justify-content:center;font-weight:700}
+    .bay.ready{background:#e9f8ef;border:1px solid #cfead1;color:#0b6a30}
+    .bay.standby{background:#fff8e6;border:1px solid #fbebbf;color:#a36a00}
+    .bay.maint{background:#fff0f0;border:1px solid #f7c9c9;color:#9a1f1f}
+
+    footer{padding:12px 18px;color:var(--muted);font-size:13px}
+
+    .muted{color:var(--muted);font-size:13px}
+    .small{font-size:12px;color:#3b4b5a}
+    button{background:var(--accent);color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}
+    a.link{color:var(--accent);text-decoration:none;font-weight:600}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>KMRL</h1>
+    <div style="flex:1"></div>
+    <div class="muted">Kochi Metro Rail Limited</div>
+  </header>
+
+  <main class="container">
+    <aside class="sidebar card">
+      <h3 style="margin:0 0 12px 0">Depot Snapshot</h3>
+      <div class="kpi">
+        <div class="item"><div class="label">Total Trainsets</div><div class="value">25</div></div>
+        <div class="item"><div class="label">Service-Ready</div><div class="value">18</div></div>
+        <div class="item"><div class="label">Standby</div><div class="value">4</div></div>
+        <div class="item"><div class="label">Maintenance</div><div class="value">3</div></div>
+      </div>
+
+      <div style="height:16px"></div>
+      <div class="small muted">Quick actions</div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button id="autoRank">Recompute Rank</button>
+        <button id="reset">Reset</button>
+      </div>
+
+      <div style="height:18px"></div>
+      <div class="small muted">Legend</div>
+      <div style="display:flex;gap:6px;flex-direction:column;margin-top:8px">
+        <div class="chip ok">✅ Fit</div>
+        <div class="chip warn">⚠️ Warning</div>
+        <div class="chip bad">❌ Not Ready</div>
+      </div>
+    </aside>
+
+    <section class="main">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h2 style="margin:0;font-size:16px">Unified Train Data</h2>
+          <div class="filters">
+            <select id="filterCert"><option value="all">All certs</option><option value="expired">Expired</option><option value="valid">Valid</option></select>
+            <input id="search" placeholder="Search Train ID" />
+          </div>
+        </div>
+        <table id="dataTable">
+          <thead>
+            <tr><th>Train</th><th>Fitness</th><th>Job-Card</th><th>Branding</th><th>Mileage</th><th>Cleaning</th><th>Bay</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2 style="margin:0;font-size:16px">Depot Info</h2>
+        <div style="margin-top:8px">
+          <p>Bays: 24</p>
+          <p>Lanes: 6</p>
+          <p>Capacity per bay: 1 train</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin:0;font-size:16px">Daily Schedule</h2>
+        <table style="width:100%;margin-top:8px">
+          <thead>
+            <tr><th>Train</th><th>Departure</th><th>Arrival</th><th>Status</th></tr>
+          </thead>
+          <tbody id="scheduleTable"></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2 style="margin:0;font-size:16px">Reports</h2>
+        <div style="display:flex;gap:12px;margin-top:8px">
+          <button onclick="generateReport('daily')">Daily</button>
+          <button onclick="generateReport('monthly')">Monthly</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin:0;font-size:16px">What-if Simulation</h2>
+        <div style="height:10px"></div>
+        <div class="sim">
+          <select id="scenario">
+            <option value="none">Select scenario</option>
+            <option value="telecomFail">Telecom clearance failure</option>
+            <option value="cleaningBlocked">Cleaning slot blocked</option>
+            <option value="brandingBoost">Branding urgent</option>
+          </select>
+          <button id="applySim">Apply</button>
+          <div style="flex:1"></div>
+        </div>
+
+        <div style="height:12px"></div>
+        <div class="beforeafter">
+          <div class="mini card"><div class="small muted">Before</div><ol id="beforeList"></ol></div>
+          <div class="mini card"><div class="small muted">After</div><ol id="afterList"></ol></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin:0;font-size:16px">Stabling Geometry</h2>
+        <div style="height:8px"></div>
+        <div class="grid" id="depotGrid"></div>
+      </div>
+    </section>
+
+    <aside class="right">
+      <div class="card">
+        <h2 style="margin:0;font-size:16px">Train Ranking</h2>
+        <div style="height:10px"></div>
+        <div class="rank-list" id="rankList"></div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin:0;font-size:15px">Conflict Alerts</h3>
+        <ul id="alerts" class="muted small" style="margin-top:8px"></ul>
+      </div>
+
+      <div class="card">
+        <h3>User Accounts</h3>
+        <table style="width:100%;margin-top:8px">
+          <thead>
+            <tr><th>Name</th><th>Dept</th><th>Role</th><th>Action</th></tr>
+          </thead>
+          <tbody id="userTable"></tbody>
+        </table>
+        <button onclick="addUser()">Add User</button>
+      </div>
+
+      <div class="card">
+        <h3>Maintenance Requests</h3>
+        <table style="width:100%;margin-top:8px">
+          <thead><tr><th>Train</th><th>Request</th><th>Action</th></tr></thead>
+          <tbody id="requestTable"></tbody>
+        </table>
+      </div>
+    </aside>
+  </main>
+
+  <footer><center>© Kochi Metro Rail Limited.</center></footer>
+
+  <div id="drawer" class="drawer" style="display:none"></div>
+
+  <script>
+    const trains = [];
+    const rand = (a,b)=>Math.floor(Math.random()*(b-a+1))+a;
+    const brands = ['None','AdCorp','RailAds','TourismKG','GovPromo'];
+    for(let i=1;i<=25;i++){
+      const id = i.toString().padStart(2,'0');
+      trains.push({
+        id: 'T'+id,
+        fitnessDays: rand(-5,120),
+        jobOpen: rand(0,3),
+        branding: brands[rand(0,brands.length-1)],
+        mileage: rand(5000,35000),
+        cleaningSlot: rand(0,1)===1 ? 'Available' : 'Blocked',
+        bay: rand(1,30),
+        telecomOk: rand(0,1)===1
+      });
+    }
+
+    function readiness(t){
+      let score = 60;
+      if(t.fitnessDays<=0) score -= 50; else score += Math.min(30, Math.floor(t.fitnessDays/4));
+      score -= Math.min(20, t.jobOpen*6);
+      if(t.branding!=='None') score += 8;
+      if(t.mileage>30000) score -= 8; else if(t.mileage<10000) score += 6;
+      if(t.cleaningSlot==='Available') score += 6;
+      if(!t.telecomOk) score -= 30;
+      return Math.max(0,Math.min(100,score));
+    }
+
+    function renderTable(){
+      const tbody = document.querySelector('#dataTable tbody'); tbody.innerHTML='';
+      const filter = document.getElementById('filterCert').value;
+      const q = document.getElementById('search').value.trim().toLowerCase();
+      trains.forEach(t=>{
+        if(filter==='expired' && t.fitnessDays>0) return;
+        if(filter==='valid' && t.fitnessDays<=0) return;
+        if(q && !t.id.toLowerCase().includes(q)) return;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${t.id}</td>
+          <td>${t.fitnessDays>0?('<span class="chip ok">✔️ '+t.fitnessDays+'d</span>'):("<span class='chip bad'>✖️ expired</span>")}</td>
+          <td>${t.jobOpen} open</td>
+          <td>${t.branding}</td>
+          <td>${t.mileage.toLocaleString()}</td>
+          <td>${t.cleaningSlot}</td>
+          <td>Bay ${t.bay}</td>`;
+        tbody.appendChild(tr);
+      })
+    }
+
+    function computeRank(){
+      const ranked = trains.map(t=>({...t,score:readiness(t)})).sort((a,b)=>b.score - a.score);
+      return ranked;
+    }
+
+    function renderRankList(ranked){
+      const container = document.getElementById('rankList'); container.innerHTML='';
+      const alerts = document.getElementById('alerts'); alerts.innerHTML='';
+      ranked.slice(0,15).forEach((t,idx)=>{
+        const div = document.createElement('div'); div.className='train-card';
+        div.innerHTML = `<div class='meta'><div style='font-weight:700'>#${idx+1} — ${t.id}</div>
+          <div class='small muted'>${t.branding!=='None'?t.branding:'No Branding'}</div></div>
+          <div style='display:flex;gap:10px;align-items:center'>
+            <div class='progress' title='Readiness ${t.score}%'><i style='width:${t.score}%'></i></div>
+            <div style='min-width:44px;text-align:right;font-weight:700'>${Math.round(t.score)}%</div>
+          </div>`;
+        div.onclick = ()=>openDrawer(t);
+        container.appendChild(div);
+
+        if(t.fitnessDays <= 0){
+          const li = document.createElement('li'); li.textContent = `${t.id} — fitness expired`; alerts.appendChild(li);
+        } else if(t.fitnessDays < 15){
+          const li = document.createElement('li'); li.textContent = `${t.id} — fitness expiring soon (${t.fitnessDays}d)`; alerts.appendChild(li);
+        }
+        if(!t.telecomOk){
+          const li = document.createElement('li'); li.textContent = `${t.id} — telecom clearance missing`; alerts.appendChild(li);
+        }
+        if(t.cleaningSlot === 'Blocked'){
+          const li = document.createElement('li'); li.textContent = `${t.id} — cleaning Blocked`; alerts.appendChild(li);
+        }
+        if(t.jobOpen > 0){
+          const li = document.createElement('li'); li.textContent = `${t.id} — ${t.jobOpen} open job-cards`; alerts.appendChild(li);
+        }
+        if(t.mileage > 30000){
+          const li = document.createElement('li'); li.textContent = `${t.id} — high mileage (${t.mileage.toLocaleString()} km)`; alerts.appendChild(li);
+        }
+        if(t.branding === 'None'){
+          const li = document.createElement('li'); li.textContent = `${t.id} — no branding assigned`; alerts.appendChild(li);
+        }
+      })
+    }
+
+    function openDrawer(train){
+      const d = document.getElementById('drawer'); d.style.display='block';
+      d.innerHTML = `<button onclick="document.getElementById('drawer').style.display='none'" style='float:right;background:transparent;border:none;color:#666;cursor:pointer'>Close ✖</button>
+        <h3>${train.id} — Explainability</h3>
+        <div class='small muted'>Service Readiness: <strong>${Math.round(train.score||readiness(train))}%</strong></div>
+        <div style='height:10px'></div>
+        <div class='reason'><div style='font-weight:700'>Fitness</div><div style='margin-left:auto'>${train.fitnessDays>0?train.fitnessDays+' days left':'Expired'}</div></div>
+        <div class='reason'><div style='font-weight:700'>Job-cards</div><div style='margin-left:auto'>${train.jobOpen} open</div></div>
+        <div class='reason'><div style='font-weight:700'>Branding</div><div style='margin-left:auto'>${train.branding}</div></div>
+        <div class='reason'><div style='font-weight:700'>Mileage</div><div style='margin-left:auto'>${train.mileage.toLocaleString()}</div></div>
+        <div class='reason'><div style='font-weight:700'>Cleaning</div><div style='margin-left:auto'>${train.cleaningSlot}</div></div>
+        <div class='reason'><div style='font-weight:700'>Telecom</div><div style='margin-left:auto'>${train.telecomOk? 'OK':'MISSING'}</div></div>
+        <div style='height:10px'></div>
+        <div class='small muted'>Suggested action: <strong>${train.fitnessDays<=0? 'Hold for maintenance':'Deploy / Standby as per rank'}</strong></div>`;
+    }
+
+    function renderGrid(ranked){
+      const grid = document.getElementById('depotGrid'); grid.innerHTML='';
+      for(let i=0;i<24;i++){
+        const t = ranked[i] || {id:'--',score:0};
+        const div = document.createElement('div'); div.className='bay';
+        if(t.score>=70) div.classList.add('ready'); else if(t.score>=40) div.classList.add('standby'); else div.classList.add('maint');
+        div.textContent = t.id;
+        grid.appendChild(div);
+      }
+    }
+
+    function renderBeforeAfter(before, after){
+      const b = document.getElementById('beforeList'); const a = document.getElementById('afterList'); b.innerHTML=''; a.innerHTML='';
+      before.slice(0,8).forEach(t=>{const li=document.createElement('li');li.textContent=`${t.id} — ${Math.round(t.score)}%`; b.appendChild(li)});
+      after.slice(0,8).forEach(t=>{const li=document.createElement('li');li.textContent=`${t.id} — ${Math.round(t.score)}%`; a.appendChild(li)});
+    }
+
+    document.getElementById('applySim').onclick = function(){
+      const s = document.getElementById('scenario').value;
+      const before = computeRank();
+      let backup = JSON.parse(JSON.stringify(trains));
+      if(s==='telecomFail'){
+        const t = trains.find(x=>x.id==='T07'); if(t) t.telecomOk=false;
+      }else if(s==='cleaningBlocked'){
+        const t = trains.find(x=>x.id==='T14'); if(t) t.cleaningSlot='Blocked';
+      }else if(s==='brandingBoost'){
+        const t = trains.find(x=>x.id==='T21'); if(t) t.branding='GovPromo';
+      }
+      const after = computeRank();
+      renderBeforeAfter(before, after);
+      trains.splice(0,trains.length,...backup);
+    }
+
+    document.getElementById('autoRank').onclick = function(){
+      const r = computeRank();
+      r.forEach((t,idx)=>{t.rank=idx+1;t.score=Math.round(t.score)});
+      renderRankList(r);
+      renderTable();
+      renderGrid(r);
+    }
+    document.getElementById('reset').onclick = function(){ location.reload(); }
+    document.getElementById('filterCert').onchange = renderTable;
+    document.getElementById('search').oninput = renderTable;
+
+    const schedules = [
+      {train:'T01', dep:'08:00', arr:'09:15', status:'On Time'},
+      {train:'T02', dep:'08:30', arr:'09:45', status:'Delayed'}
+    ];
+    function renderSchedule(){
+      const tbody = document.getElementById('scheduleTable'); tbody.innerHTML='';
+      schedules.forEach(s=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td>${s.train}</td><td>${s.dep}</td><td>${s.arr}</td><td>${s.status}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function generateReport(type){ alert('Generate '+type+' report'); }
+
+    const users = [
+      {name:'Alice', dept:'Operations', role:'Manager'},
+      {name:'Bob', dept:'Maintenance', role:'Technician'}
+    ];
+    function renderUsers(){
+      const tbody = document.getElementById('userTable'); tbody.innerHTML='';
+      users.forEach((u,i)=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${u.name}</td><td>${u.dept}</td><td>${u.role}</td><td><button onclick="editUser(${i})">Edit</button></td>`;
+        tbody.appendChild(tr);
+      });
+    }
+    function addUser(){ alert('Add user modal or form here'); }
+    function editUser(i){ alert('Edit user: '+users[i].name); }
+
+    const requests = [
+      {train:'T07', type:'Brake Check'},
+      {train:'T14', type:'HVAC Service'}
+    ];
+    function renderRequests(){
+      const tbody=document.getElementById('requestTable'); tbody.innerHTML='';
+      requests.forEach((r,i)=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td>${r.train}</td><td>${r.type}</td>
+          <td>
+            <button onclick="approve(${i})">Approve</button>
+            <button onclick="deny(${i})">Deny</button>
+          </td>`;
+        tbody.appendChild(tr);
+      });
+    }
+    function approve(i){ alert('Approved '+requests[i].train); }
+    function deny(i){ alert('Denied '+requests[i].train); }
+
+    (function init(){
+      renderTable();
+      const r = computeRank();
+      r.forEach(t=>t.score=Math.round(t.score));
+      renderRankList(r);
+      renderGrid(r);
+      renderBeforeAfter(r,r);
+      renderSchedule();
+      renderUsers();
+      renderRequests();
+    })();
+  </script>
+</body>
+</html>

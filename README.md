@@ -79,6 +79,7 @@ Frontend: ReactJS / Dash (for dashboards and simulations)
 Visualization: Plotly, D3.js, or Highcharts
 
 📂 Repository Structure
+
 ├── backend/        # API & optimization engine
 ├── frontend/       # Dashboard and UI
 ├── data/           # Sample datasets & historical records

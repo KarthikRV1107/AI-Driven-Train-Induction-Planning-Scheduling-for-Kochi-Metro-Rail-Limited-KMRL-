@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kochi Metro Rail Limited</title>
+<link rel="icon" type="image/x-icon" href="images/STK-20250921-WA0001.webp">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    color: #333;
+    line-height: 1.6;
+    background: #f5f7fa;
+}
+
+header {
+    background: linear-gradient(90deg, #007bff, #00b894);
+    color: #fff;
+    padding: 15px 40px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+header .logo{
+    font-size: 26px;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+nav ul {
+    list-style: none;
+    display: flex;
+    gap: 25px;
+}
+nav ul li a {
+    color: #fff;
+    text-decoration: none;
+    font-size: 15px;
+    padding: 8px;
+    transition: 0.3s;
+}
+nav ul li a:hover {
+    background: rgba(255,255,255,0.2);
+    border-radius: 6px;
+}
+
+.hero {
+    position: relative;
+    background: url('images/Screenshot 2025-09-21 172053.png') center/cover no-repeat;
+    height: 450px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: #fff;
+    overflow: hidden;
+}
+.hero::after {
+    content:'';
+    position:absolute;
+    top:0; left:0;
+    width:100%; height:100%;
+    background: rgba(0,0,0,0.5);
+}
+.hero-content {
+    position: relative;
+    z-index: 2;
+    text-align: center;
+    max-width: 800px;
+    animation: fadeIn 1.5s ease-in-out;
+}
+.hero-content h1 {
+    font-size: 48px;
+    margin-bottom: 15px;
+    animation: slideIn 1.5s ease-out;
+}
+.hero-content p {
+    font-size: 20px;
+    margin-bottom: 20px;
+}
+.hero-content button {
+    background: #ffcc00;
+    color: #000;
+    padding: 12px 28px;
+    border: none;
+    border-radius: 25px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: 0.3s;
+}
+.hero-content button:hover {
+    background: #e6b800;
+}
+@keyframes fadeIn { from{opacity:0;} to{opacity:1;} }
+@keyframes slideIn { from{transform:translateY(-20px);opacity:0;} to{transform:translateY(0);opacity:1;} }
+
+.container {
+    width: 90%;
+    max-width: 1200px;
+    margin: 50px auto;
+}
+
+.section { margin-bottom: 60px; }
+.section h2 {
+    text-align: center;
+    margin-bottom: 30px;
+    color: #007bff;
+    font-size: 28px;
+}
+
+.news-slider {
+    display: flex;
+    overflow-x: auto;
+    gap: 25px;
+    padding-bottom: 10px;
+    scroll-behavior: smooth;
+}
+.news-slider::-webkit-scrollbar { display: none; }
+
+.news-card {
+    min-width: 280px;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    overflow: hidden;
+    transition: 0.3s;
+}
+.news-card:hover { transform: translateY(-5px); }
+.news-card img { width:100%; height:180px; object-fit:cover; }
+.news-card .content { padding: 18px; }
+.news-card .content h3 { font-size: 18px; margin-bottom: 10px; color: #00b894; }
+.news-card .content p { font-size: 14px; color: #555; }
+
+.station-map { text-align: center; }
+.stations-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    justify-content: center;
+}
+.stations-list .station {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 20px;
+    padding: 8px 16px;
+    font-size: 14px;
+    color: #007bff;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    transition: 0.3s;
+}
+.stations-list .station:hover { transform: scale(1.05); }
+
+.card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 20px;
+}
+.info-card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+    transition: 0.3s;
+    text-align: center;
+}
+.info-card:hover { transform: translateY(-5px); }
+.info-card h3 { color: #00b894; font-size: 18px; margin-bottom: 10px; }
+.info-card p { font-size: 14px; color: #555; }
+
+.info-card img {
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+    border-radius: 10px; 
+    margin-bottom: 10px;
+}
+
+
+footer {
+    background: linear-gradient(90deg, #007bff, #00b894);
+    color: #fff;
+    padding: 40px;
+    text-align: center;
+    font-size: 14px;
+}
+footer a { color: #ffeb3b; text-decoration:none; }
+footer a:hover { text-decoration: underline; }
+footer .social-icons { margin-top: 15px; }
+footer .social-icons a { margin:0 8px; color:#fff; font-size:18px; }
+footer .social-icons a:hover { color:#ffeb3b; }
+
+@media(max-width:768px) {
+    .hero-content h1 { font-size: 32px; }
+    .hero-content p { font-size: 16px; }
+    .news-slider { flex-wrap: nowrap; }
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.logo img {
+    height: 39px;
+    width: auto;
+}
+
+</style>
+</head>
+<body>
+
+<header>
+    <div class="logo">
+        <img src="images/STK-20250921-WA0001.webp" alt="Kochi Metro Logo" />
+        കൊച്ചി മെട്രോ റെയിൽവേ
+    </div>
+    <nav>
+        <ul>
+            <li><a href="#">Home</a></li>
+            <li><a href="#">About</a></li>
+            <li><a href="#">News</a></li>
+            <li><a href="#">Stations</a></li>
+            <li><a href="login.html">Login</a></li>
+        </ul>
+    </nav>
+</header>
+
+
+
+<section class="hero">
+    <div class="hero-content">
+        <h1>Seamless Urban Mobility</h1>
+        <p>Kochi Metro — Connecting the city with speed, sustainability & innovation.</p>
+        <button onclick="location.href='login.html'">Explore</button>
+    </div>
+</section>
+
+<div class="container">
+
+
+    <div class="section">
+        <h2>Keep Track</h2>
+        <div class="news-slider">
+            <div class="news-card">
+                <img src="images/metrotrain.png" alt="News 1">
+                <div class="content">
+                    <h3>Smart Train Induction</h3>
+                    <p>KMRL introduces AI-driven scheduling to improve fleet utilization.</p>
+                </div>
+            </div>
+            <div class="news-card">
+                <img src="images/Maintenance Bay Upgrades.jpg" alt="News 2">
+                <div class="content">
+                    <h3>Maintenance Bay Upgrades</h3>
+                    <p>New equipment installed to speed up diagnostics and reduce downtime.</p>
+                </div>
+            </div>
+            <div class="news-card">
+                <img src="images/mentanence.jpg" alt="News 3">
+                <div class="content">
+                    <h3>Cleaning Schedules Published</h3>
+                    <p>Transparency in cleaning schedules brings accountability to operations.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <div class="section station-map">
+        <h2>Stations</h2>
+        <h1>Connecting Lives</h1>
+        <p>Take a closer look at our station locations in this interactive map to plan your trip and day with ease.</p><br>
+        <div class="stations-list">
+            <div class="station">Aluva</div>
+            <div class="station">Ambattukkavu</div>
+            <div class="station">Kalamassery</div>
+            <div class="station">Cochin University</div>
+            <div class="station">Edappally</div>
+            <div class="station">Changampuzha Park</div>
+            <div class="station">Palarivattom</div>
+            <div class="station">Stadium</div>
+            <div class="station">Kaloor</div>
+            <div class="station">Town Hall</div>
+            <div class="station">MG Road</div>
+            <div class="station">Maharaja's College</div>
+            <div class="station">Ernakulam South</div>
+            <div class="station">Elamkulam</div>
+            <div class="station">Petta</div>
+            <div class="station">S. N. Junction</div>
+            <div class="station">Tripunithura Terminal</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Travel Guide</h2>
+        <div class="card-grid">
+            <div class="info-card"><h3>Route Planning</h3><p>Plan your journey across the city with ease.</p></div>
+            <div class="info-card"><h3>Timings & Schedule</h3><p>Up-to-date train timings for hassle-free travel.</p></div>
+            <div class="info-card"><h3>Fare & Tickets</h3><p>Know your fare options and ticketing methods.</p></div>
+            <div class="info-card"><h3>Mobile App</h3><p>Download Kochi Metro’s app for real-time info.</p></div>
+            <div class="info-card"><h3>Accessibility</h3><p>Facilities for differently-abled passengers.</p></div>
+            <div class="info-card"><h3>Parking</h3><p>Park & ride with convenient parking stations.</p></div>
+            <div class="info-card"><h3>Safety Precautions</h3><p>Travel safely with metro security guidelines.</p></div>
+            <div class="info-card"><h3>Facilities at Stations</h3><p>Shops, restrooms, Wi-Fi and more for comfort.</p></div>
+        </div>
+    </div>
+
+   <div class="section">
+    <h2>Metro Attractions</h2>
+    <div class="card-grid">
+        <div class="info-card">
+            <img src="images/marine drive.jpg" alt="Marine Drive" />
+            <h3>Marine Drive</h3>
+            <p>Scenic waterfront promenade near MG Road.</p>
+        </div>
+        <div class="info-card">
+            <img src="images/lulu mall.png" alt="Lulu Mall" />
+            <h3>Lulu Mall</h3>
+            <p>One of India’s largest malls at Edappally.</p>
+        </div>
+        <div class="info-card">
+            <img src="images/Fort kochi.jpg" alt="Fort Kochi" />
+            <h3>Fort Kochi</h3>
+            <p>Historic charm accessible via Metro + ferry.</p>
+        </div>
+        <div class="info-card">
+            <img src="images/Hill Palace.jpg" alt="Hill Palace" />
+            <h3>Hill Palace</h3>
+            <p>Kerala’s largest archaeological museum near Tripunithura.</p>
+        </div>
+        <div class="info-card">
+            <img src="images/Vyttila Mobility Hub.jpg" alt="Vyttila Mobility Hub" />
+            <h3>Vyttila Mobility Hub</h3>
+            <p>Major transport hub connecting bus, boat & metro.</p>
+        </div>
+        <div class="info-card">
+            <img src="images/Mangalavanam Bird Sanctuary.jpg" alt="Mangalavanam Bird Sanctuary" />
+            <h3>Mangalavanam Bird Sanctuary</h3>
+            <p>Urban green lung near Ernakulam.</p>
+        </div>
+    </div>
+</div>
+
+</div>
+
+<footer>
+    <p>JLN Metro Station, 4th Floor Kaloor, Ernakulam - 682017 | Contact: 0484-2846700 | Toll-free: 1800-425-0355</p>
+        <a href="https://www.instagram.com/kochimetrorail/">Instagram</a>
+        <a href="https://www.facebook.com/KochiMetroRail/">Facebook</a>
+        <a href="https://x.com/MetroRailKochi/">X</a>
+        <a href="https://www.linkedin.com/company/metrorailkochi/?originalSubdomain=in">LinkerIn</a>
+        <a href="https://www.youtube.com/KochiMetroRail">YouTube</a><br><br><hr><br>
+    <p>© 2025 Kochi Metro Rail Limited. All rights reserved.
+</footer>
+
+</body>
+</html>

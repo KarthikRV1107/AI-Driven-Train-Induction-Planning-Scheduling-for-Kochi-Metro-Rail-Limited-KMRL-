@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kochi Metro Rail Limited</title>
+<link rel="icon" type="x-icon" href="images/STK-20250921-WA0001.webp">
+<style>
+  body {font-family: Arial, sans-serif; margin:0; background:#f4f6f8; color:#1a202c;}
+  header {background:#1976D2; color:white; padding:1rem; text-align:center; font-weight: 700;}
+  main {display:flex; gap:15px; padding:15px;}
+  .card {background:white; border-radius:10px; padding:16px; flex:1; box-shadow:0 4px 12px rgba(0,0,0,0.08);}
+  h2 {margin-top:0; font-size:18px; color:#1976D2;}
+  table {width:100%; border-collapse:collapse; margin-top:12px;}
+  th, td {padding:10px; text-align:left; border-bottom:1px solid #e0e0e0;}
+  th {color:#6b7280; font-weight:600;}
+  button {padding:6px 12px; border:none; border-radius:6px; background:#1976D2; color:white; cursor:pointer;}
+  select, input {padding:6px 8px; border-radius:6px; border:1px solid #cfd8dc;}
+  .progress {height:12px; background:#eee; border-radius:6px; overflow:hidden; margin-top:4px;}
+  .progress-bar {height:100%; background:#43A047;}
+  .bay-grid {display:grid; grid-template-columns:repeat(6,1fr); gap:8px; margin-top:12px;}
+  .bay {height:64px; border-radius:8px; border:1px dashed #b0bec5; display:flex; justify-content:center; align-items:center; font-weight:700; background:#fafafa;}
+  .bay.occupied {background:#ffe0b2; border:1px solid #ffb74d;}
+  .bay.completed {background:#c8e6c9; border:1px solid #43a047;}
+</style>
+</head>
+<body>
+
+<header>
+  KMRL Maintenance Management
+</header>
+
+<main>
+  <div class="card">
+    <h2>Trains Flagged for Maintenance</h2>
+    <table id="maintenanceTable">
+      <thead>
+        <tr><th>Train</th><th>Mileage</th><th>Last Service</th><th>Status</th><th>Action</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Maintenance Bays</h2>
+    <div class="bay-grid" id="baysGrid"></div>
+    <div style="margin-top:12px">
+      <select id="selectTrain"><option value="">Select Train</option></select>
+      <select id="selectBay"><option value="">Select Bay</option></select>
+      <button id="assignBay">Assign to Bay</button>
+    </div>
+  </div>
+</main>
+
+<script>
+  const trains = [
+    {id:'T03', mileage:15200, lastService:'2025-08-01', status:'Pending', bay:null},
+    {id:'T07', mileage:31000, lastService:'2025-06-15', status:'Pending', bay:null},
+    {id:'T14', mileage:28700, lastService:'2025-07-10', status:'Pending', bay:null},
+    {id:'T19', mileage:34500, lastService:'2025-05-20', status:'Pending', bay:null}
+  ];
+
+  const bays = Array.from({length:12}, (_,i)=>({id:i+1, train:null}));
+
+  function renderTrains(){
+    const tbody = document.querySelector('#maintenanceTable tbody'); tbody.innerHTML='';
+    trains.forEach(t=>{
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${t.id}</td>
+        <td>${t.mileage.toLocaleString()}</td>
+        <td>${t.lastService}</td>
+        <td>${t.status}</td>
+        <td>
+          ${t.status==='Pending'?`<button onclick="startService('${t.id}')">Start</button>`:
+          t.status==='In Progress'?`<button onclick="completeService('${t.id}')">Complete</button>`:
+          'Completed'}
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+    renderSelectTrain();
+  }
+
+  function renderBays(){
+    const grid = document.getElementById('baysGrid'); grid.innerHTML='';
+    bays.forEach(b=>{
+      const div = document.createElement('div'); div.className='bay';
+      if(b.train) div.classList.add(b.train.status==='Completed'?'completed':'occupied');
+      div.textContent = b.train?b.train.id : 'Bay '+b.id;
+      grid.appendChild(div);
+    });
+    renderSelectBay();
+  }
+
+  function renderSelectTrain(){
+    const sel = document.getElementById('selectTrain'); sel.innerHTML='<option value="">Select Train</option>';
+    trains.filter(t=>t.status!=='Completed').forEach(t=>{
+      const opt = document.createElement('option'); opt.value=t.id; opt.textContent=t.id+' ('+t.status+')';
+      sel.appendChild(opt);
+    });
+  }
+
+  function renderSelectBay(){
+    const sel = document.getElementById('selectBay'); sel.innerHTML='<option value="">Select Bay</option>';
+    bays.filter(b=>!b.train).forEach(b=>{
+      const opt = document.createElement('option'); opt.value=b.id; opt.textContent='Bay '+b.id;
+      sel.appendChild(opt);
+    });
+  }
+
+  function startService(trainId){
+    const train = trains.find(t=>t.id===trainId);
+    if(train){ train.status='In Progress'; renderTrains(); renderBays(); }
+  }
+
+  function completeService(trainId){
+    const train = trains.find(t=>t.id===trainId);
+    if(train){ 
+      train.status='Completed'; 
+      train.lastService=new Date().toISOString().slice(0,10);
+      const bay = bays.find(b=>b.train && b.train.id===trainId);
+      if(bay) bay.train=null;
+      renderTrains(); 
+      renderBays(); 
+    }
+  }
+
+  document.getElementById('assignBay').onclick = function(){
+    const trainId = document.getElementById('selectTrain').value;
+    const bayId = parseInt(document.getElementById('selectBay').value);
+    if(!trainId || !bayId) return alert('Select train and bay');
+    const train = trains.find(t=>t.id===trainId);
+    const bay = bays.find(b=>b.id===bayId);
+    if(train && bay && !bay.train){
+      bay.train=train;
+      train.status='In Progress';
+      renderTrains(); renderBays();
+    }
+  }
+
+  renderTrains();
+  renderBays();
+</script>
+
+</body>
+</html>

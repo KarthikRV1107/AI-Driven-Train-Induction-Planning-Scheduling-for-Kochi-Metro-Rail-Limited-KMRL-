@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kochi Metro Rail Limited</title>
+<link rel="icon" type="x-icon" href="images/STK-20250921-WA0001.webp">
+<style>
+  body {
+    margin:0;
+    height:100vh;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    background: #f0f4f8;
+    font-family: Arial, sans-serif;
+    background-image: url('images/loginbg.jpg');
+    background-repeat: no-repeat;
+    background-size: 100%;
+  }
+  .login-box {
+    background: transparent;
+    padding: 0px 40px;
+    border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+    width: 360px;
+    text-align: center;
+  }
+  h2 {
+    margin: 10px 0;
+    margin-top: -13px;
+    color: rgb(0, 0, 0);
+  }
+  p.subtext {
+    margin: 0 0 20px 0;
+    font-size: 14px;
+    color: rgb(0, 0, 0);
+  }
+  input[type="text"], input[type="password"] {
+    width: 100%;
+    padding: 10px 12px;
+    margin-bottom: 16px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+    font-size: 14px;
+  }
+  button {
+    width: 107%;
+    padding: 10px 0;
+    border: none;
+    border-radius: 8px;
+    background-color: #1976D2;
+    color: white;
+    font-size: 16px;
+    cursor: pointer;
+  }
+  button:hover {
+    background-color: #155fa0;
+  }
+  .error {
+    color: #E53935;
+    font-size: 13px;
+    margin-top: 10px;
+  }
+  .default-logins {
+    margin-top: 25px;
+    text-align: left;
+    font-size: 13px;
+    background: #f9f9f9;
+    border: 1px solid #ddd;
+    padding: 15px;
+    border-radius: 8px;
+  }
+  .default-logins h4 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    color: #1976D2;
+  }
+  .default-logins div {
+    margin-bottom: 10px;
+  }
+  .default-logins strong {
+    color: #333;
+  }
+  .logo{
+    size: 200px;
+    margin-top: -10px;
+  }
+</style>
+</head>
+<body>
+
+<div class="login-box">
+  <div class="logo"><img src="images/STK-20250921-WA0001.webp" alt="logo" width="100px"></div>
+  <h6 style="margin-top: -20px;">KOCHI METRO RAIL LIMITED</h6>
+  <h2>സ്വാഗതം</h2>
+  <p class="subtext">Sign in to your account</p>
+
+    <div class="default-logins">
+    <h4>Test Credentials<hr></h4>
+    
+    <div>👨‍💼 <strong>Admin Access</strong><br>
+      Username: <code>karthik</code> | Password: <code>1234</code>
+    </div>
+    
+    <div>⚙️ <strong>Operations</strong><br>
+      Username: <code>chandan</code> | Password: <code>2384</code>
+    </div>
+    
+    <div>🔧 <strong>Maintenance</strong><br>
+      Username: <code>karu</code> | Password: <code>0987</code>
+    </div>
+    
+    <div>🔍 <strong>Inspection</strong><br>
+      Username: <code>tanuj</code> | Password: <code>5678</code>
+    </div>
+    
+    <div>🧹 <strong>Cleaning</strong><br>
+      Username: <code>roy</code> | Password: <code>9845</code>
+    </div>
+  </div><br>
+  
+  <input type="text" id="username" placeholder="Enter your username">
+  <input type="password" id="password" placeholder="Enter your password">
+  <button onclick="login()">Login</button>
+  <div id="error" class="error"></div>
+</div>
+
+<script>
+  const users = {
+    'karthik': { password: '1234', page: 'admin.html' },
+    'chandan': { password: '2384', page: 'operations.html' },
+    'karu': { password: '0987', page: 'maintenance.html' },
+    'tanuj': { password: '5678', page: 'inspection.html' },
+    'roy': { password: '9845', page: 'cleaning.html' }
+  };
+
+  function login() {
+    const user = document.getElementById('username').value.trim().toLowerCase();
+    const pass = document.getElementById('password').value.trim();
+    const errorDiv = document.getElementById('error');
+    errorDiv.textContent = '';
+
+    if(users[user] && users[user].password === pass) {
+      window.location.href = users[user].page;
+    } else {
+      errorDiv.textContent = 'Invalid username or password!';
+    }
+  }
+
+  document.addEventListener('keyup', function(event) {
+    if (event.key === 'Enter') login();
+  });
+</script>
+
+</body>
+</html>

@@ -34,7 +34,7 @@ Kafka UI: http://localhost:8080
 
 ## Vercel Deployment
 
-Deploy only `frontend/` to Vercel and host `backend/` separately. The Vercel-specific setup guide is in [docs/VERCEL.md](/C:/Users/WELCOME/Downloads/kmrl-nexusai/kmrl/docs/VERCEL.md).
+Deploy the repository root to Vercel and the build will target `frontend/` automatically, or set the Vercel root directory to `frontend/` if you prefer. Host `backend/` separately. The Vercel-specific setup guide is in [docs/VERCEL.md](/C:/Users/WELCOME/Downloads/kmrl-nexusai/kmrl/docs/VERCEL.md).
 
 ## Tech Stack
 

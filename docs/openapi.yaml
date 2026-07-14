@@ -1,0 +1,424 @@
+openapi: "3.1.0"
+info:
+  title: KMRL NexusAI API
+  description: |
+    ## AI-Driven Train Induction Planning & Scheduling Platform
+    Kochi Metro Rail Limited — REST + WebSocket API v1
+
+    ### Authentication
+    All endpoints (except `/health`, `/api/v1/auth/token`) require a Bearer JWT token.
+
+    ```
+    Authorization: Bearer <access_token>
+    ```
+
+    ### Rate Limits
+    - Auth endpoints: **10 requests/minute** per IP
+    - API endpoints: **60 requests/minute** per IP
+    - WebSocket: **5 connections/second** per IP
+
+    ### Response Format
+    All responses use JSON. Errors follow:
+    ```json
+    { "error": "description", "status_code": 4xx }
+    ```
+  version: "2.4.1"
+  contact:
+    name: KMRL Platform Team
+    email: platform-team@kmrl.in
+  license:
+    name: Proprietary
+    url: https://kmrl.in
+
+servers:
+  - url: https://api.nexusai.kmrl.in
+    description: Production
+  - url: https://api.staging.nexusai.kmrl.in
+    description: Staging
+  - url: http://localhost:8000
+    description: Local Development
+
+tags:
+  - name: System
+    description: Health and system information
+  - name: Auth
+    description: Authentication and token management
+  - name: Fleet
+    description: Trainset management and status
+  - name: Induction
+    description: AI induction planning and optimization
+  - name: Maintenance
+    description: Predictive maintenance and job cards
+  - name: Alerts
+    description: Alert management and acknowledgment
+  - name: Analytics
+    description: KPIs and operational analytics
+  - name: Depot
+    description: Depot layout and simulation
+  - name: Certificates
+    description: Fitness certificate management
+
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        "200":
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: healthy }
+                  version: { type: string, example: "2.4.1" }
+                  timestamp: { type: string, format: date-time }
+
+  /api/v1/auth/token:
+    post:
+      tags: [Auth]
+      summary: Login and get access token
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string, example: "depot_controller@kmrl.in" }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: JWT token issued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenResponse" }
+        "401":
+          description: Invalid credentials
+
+  /api/v1/fleet:
+    get:
+      tags: [Fleet]
+      summary: List all trainsets
+      operationId: listFleet
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: depot_id
+          in: query
+          schema: { type: string }
+        - name: status_filter
+          in: query
+          schema:
+            type: string
+            enum: [revenue_service, standby, ibl, maintenance, cleaning, stabling]
+      responses:
+        "200":
+          description: Fleet list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trainsets:
+                    type: array
+                    items: { $ref: "#/components/schemas/TrainsetSummary" }
+                  total: { type: integer }
+
+  /api/v1/fleet/{trainset_code}:
+    get:
+      tags: [Fleet]
+      summary: Get trainset detail
+      operationId: getTrainset
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: trainset_code
+          in: path
+          required: true
+          schema: { type: string, example: "TS-14" }
+      responses:
+        "200":
+          description: Trainset detail
+        "404":
+          description: Trainset not found
+
+  /api/v1/induction/optimize:
+    post:
+      tags: [Induction]
+      summary: Run AI induction optimizer
+      description: |
+        Triggers the OR-Tools CP-SAT optimizer with ML-scored trainset inputs.
+        Returns a ranked induction plan with SHAP-based explanations.
+
+        **Timing**: Should be called during the 21:00–23:00 planning window.
+        **Timeout**: Optimizer runs for up to 30 seconds.
+      operationId: runOptimization
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InductionPlanRequest" }
+            example:
+              plan_date: "2025-06-15"
+              depot_id: "dep-001"
+              override_revenue_target: 18
+      responses:
+        "200":
+          description: Optimized induction plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InductionPlanResponse" }
+              example:
+                plan_id: "PLN-20250615-001"
+                status: "optimal"
+                score: 94.2
+                solve_time_ms: 1847.3
+                revenue_service:
+                  - rank: 1
+                    trainset_code: "TS-14"
+                    confidence_pct: 96.0
+                    reasoning:
+                      soft_score: 87.3
+                      human_reasons:
+                        - "All fitness certificates valid"
+                        - "No open critical job cards"
+                        - "Mileage 12km below fleet average"
+                        - "Branding priority HIGH (KSRTC)"
+                        - "Cleaning completed 20:14"
+        "403":
+          description: Insufficient permissions
+        "422":
+          description: Validation error
+
+  /api/v1/induction/plans/{plan_date}:
+    get:
+      tags: [Induction]
+      summary: Get plan for a specific date
+      operationId: getPlan
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: plan_date
+          in: path
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Cached plan
+        "404":
+          description: No plan found for date
+
+  /api/v1/maintenance/predictions:
+    get:
+      tags: [Maintenance]
+      summary: Get AI failure predictions
+      operationId: getMaintenancePredictions
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Failure probability per trainset and system
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  predictions:
+                    type: array
+                    items: { $ref: "#/components/schemas/MaintenancePrediction" }
+
+  /api/v1/kpis:
+    get:
+      tags: [Analytics]
+      summary: Real-time operational KPIs
+      operationId: getKPIs
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: KPI snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KPIResponse" }
+
+  /api/v1/alerts:
+    get:
+      tags: [Alerts]
+      summary: List active alerts
+      operationId: listAlerts
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: severity
+          in: query
+          schema: { type: string, enum: [critical, warning, info] }
+        - name: acknowledged
+          in: query
+          schema: { type: boolean }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 200 }
+      responses:
+        "200":
+          description: Alert list
+
+  /api/v1/alerts/{alert_id}/acknowledge:
+    patch:
+      tags: [Alerts]
+      summary: Acknowledge an alert
+      operationId: acknowledgeAlert
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: alert_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Alert acknowledged
+
+  /api/v1/depot/{depot_code}/layout:
+    get:
+      tags: [Depot]
+      summary: Get depot bay occupancy
+      operationId: getDepotLayout
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: depot_code
+          in: path
+          required: true
+          schema: { type: string, example: "MTM" }
+      responses:
+        "200":
+          description: Depot layout and occupancy
+
+  /api/v1/depot/simulate:
+    post:
+      tags: [Depot]
+      summary: Run shunting simulation
+      operationId: simulateDepot
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                depot_id: { type: string }
+                scenario: { type: string, enum: [shunting_optimization, bay_reallocation, emergency_withdrawal] }
+      responses:
+        "200":
+          description: Simulation result
+
+  /ws/live:
+    get:
+      tags: [System]
+      summary: WebSocket live feed
+      description: |
+        Real-time WebSocket connection for dashboard updates.
+
+        **Events emitted**:
+        - `trainset_status_update` — status change
+        - `induction_plan_ready` — optimizer completed
+        - `alert_raised` — new alert created
+        - `telemetry_anomaly` — sensor anomaly detected
+
+        **Client messages**:
+        - `{"type": "ping"}` → `{"type": "pong"}`
+        - `{"type": "subscribe", "topics": ["alerts", "telemetry"]}`
+      operationId: websocketLive
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    TokenResponse:
+      type: object
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, example: "bearer" }
+        expires_in: { type: integer, example: 3600 }
+        user_id: { type: string }
+        role: { type: string }
+
+    TrainsetSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        trainset_code: { type: string, example: "TS-14" }
+        current_status: { type: string }
+        total_mileage_km: { type: number }
+        brake_health: { type: number, minimum: 0, maximum: 100 }
+        hvac_health: { type: number }
+        door_health: { type: number }
+        is_active: { type: boolean }
+
+    InductionPlanRequest:
+      type: object
+      required: [depot_id]
+      properties:
+        plan_date: { type: string, format: date }
+        depot_id: { type: string }
+        override_revenue_target: { type: integer, minimum: 1, maximum: 40 }
+        force_trainset_ids: { type: array, items: { type: string } }
+
+    InductionPlanResponse:
+      type: object
+      properties:
+        plan_id: { type: string }
+        plan_date: { type: string }
+        status: { type: string, enum: [optimal, feasible, fallback] }
+        score: { type: number, minimum: 0, maximum: 100 }
+        solve_time_ms: { type: number }
+        revenue_service: { type: array, items: { $ref: "#/components/schemas/PlanItem" } }
+        standby: { type: array, items: { $ref: "#/components/schemas/PlanItem" } }
+        ibl: { type: array, items: { $ref: "#/components/schemas/PlanItem" } }
+        maintenance: { type: array, items: { $ref: "#/components/schemas/PlanItem" } }
+        mileage_variance_km: { type: number }
+        sla_compliance_pct: { type: number }
+        conflict_alerts: { type: array }
+        explanation: { type: string }
+
+    PlanItem:
+      type: object
+      properties:
+        rank: { type: integer }
+        trainset_code: { type: string }
+        confidence_pct: { type: number }
+        reasoning:
+          type: object
+          properties:
+            soft_score: { type: number }
+            human_reasons: { type: array, items: { type: string } }
+            hard_violations: { type: array, items: { type: string } }
+
+    KPIResponse:
+      type: object
+      properties:
+        fleet_availability_pct: { type: number }
+        revenue_service_count: { type: integer }
+        standby_count: { type: integer }
+        ibl_count: { type: integer }
+        maintenance_count: { type: integer }
+        total_shunting_ops_today: { type: integer }
+        avg_mileage_km: { type: number }
+        mileage_std_km: { type: number }
+        active_alerts_critical: { type: integer }
+        sla_compliance_pct: { type: number }
+        mtbf_days: { type: number }
+        mttr_hours: { type: number }
+        ai_confidence_avg: { type: number }
+
+    MaintenancePrediction:
+      type: object
+      properties:
+        trainset_code: { type: string }
+        composite_failure_risk: { type: number, minimum: 0, maximum: 1 }
+        risk_level: { type: string, enum: [low, medium, high, critical] }
+        recommendation: { type: string }
+        systems: { type: object }
+        assessed_at: { type: string, format: date-time }

@@ -1,0 +1,78 @@
+# ============================================================
+# KMRL NexusAI — .gitignore
+# ============================================================
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*credentials*.json
+vault-keys.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage-report/
+htmlcov/
+.coverage
+*.cover
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+build/
+.turbo/
+*.tsbuildinfo
+
+# ML models & data (large binary artifacts)
+backend/app/models/*.pkl
+backend/app/models/*.pt
+backend/app/models/*.joblib
+**/models/*.bin
+/tmp/kmrl-seed-data/
+feature_store/
+
+# Logs
+*.log
+logs/
+
+# Database
+*.sql.gz
+backups/
+*.db
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Docker
+.docker/
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfvars
+!*.tfvars.example
+
+# Coverage / test artifacts
+cypress/videos/
+cypress/screenshots/
+.nyc_output/
+
+# Misc
+*.bak
+*.tmp

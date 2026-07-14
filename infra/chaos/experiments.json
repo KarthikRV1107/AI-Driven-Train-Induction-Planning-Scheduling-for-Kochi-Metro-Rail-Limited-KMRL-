@@ -1,0 +1,358 @@
+{
+  "_comment": "KMRL NexusAI — Chaos Toolkit Experiment Definitions",
+  "_doc": "Run: chaos run infra/chaos/experiments.json",
+
+  "experiments": [
+
+    {
+      "title": "Optimizer survives Kafka broker failure",
+      "description": "The induction optimizer must complete successfully even when Kafka is unavailable. Optimization uses DB-only data path as fallback.",
+      "tags": ["kafka", "optimizer", "resilience"],
+      "steady-state-hypothesis": {
+        "title": "Optimizer produces valid plan",
+        "probes": [
+          {
+            "type": "probe",
+            "name": "optimizer-health",
+            "tolerance": 200,
+            "provider": {
+              "type": "http",
+              "url": "http://localhost:8000/health",
+              "timeout": 5
+            }
+          },
+          {
+            "type": "probe",
+            "name": "fleet-accessible",
+            "tolerance": 200,
+            "provider": {
+              "type": "http",
+              "url": "http://localhost:8000/api/v1/fleet",
+              "headers": {"Authorization": "Bearer ${AUTH_TOKEN}"},
+              "timeout": 10
+            }
+          }
+        ]
+      },
+      "method": [
+        {
+          "type": "action",
+          "name": "stop-kafka-broker",
+          "provider": {
+            "type": "process",
+            "path": "kubectl",
+            "arguments": ["scale", "deployment", "kafka", "--replicas=0", "-n", "kmrl-production"]
+          }
+        },
+        {
+          "type": "probe",
+          "name": "wait-for-kafka-down",
+          "provider": {
+            "type": "process",
+            "path": "sleep",
+            "arguments": ["10"]
+          }
+        },
+        {
+          "type": "probe",
+          "name": "optimizer-still-works",
+          "provider": {
+            "type": "http",
+            "url": "http://localhost:8000/api/v1/induction/optimize",
+            "method": "POST",
+            "headers": {
+              "Authorization": "Bearer ${AUTH_TOKEN}",
+              "Content-Type": "application/json"
+            },
+            "body": "{\"depot_id\": \"dep-001\"}",
+            "timeout": 40,
+            "expected_status": 200
+          }
+        }
+      ],
+      "rollbacks": [
+        {
+          "type": "action",
+          "name": "restore-kafka",
+          "provider": {
+            "type": "process",
+            "path": "kubectl",
+            "arguments": ["scale", "deployment", "kafka", "--replicas=1", "-n", "kmrl-production"]
+          }
+        }
+      ]
+    },
+
+    {
+      "title": "API remains available during rolling pod restart",
+      "description": "With 3 API replicas, a rolling restart (1 pod down at a time) must not cause any 5xx errors.",
+      "tags": ["kubernetes", "availability", "rolling-restart"],
+      "steady-state-hypothesis": {
+        "title": "API health check returns 200",
+        "probes": [
+          {
+            "type": "probe",
+            "name": "api-healthy",
+            "tolerance": 200,
+            "provider": {
+              "type": "http",
+              "url": "http://localhost:8000/health",
+              "timeout": 5
+            }
+          }
+        ]
+      },
+      "method": [
+        {
+          "type": "action",
+          "name": "delete-one-api-pod",
+          "provider": {
+            "type": "process",
+            "path": "kubectl",
+            "arguments": [
+              "delete", "pod",
+              "-l", "app=kmrl-api",
+              "-n", "kmrl-production",
+              "--field-selector=status.phase=Running",
+              "--grace-period=0",
+              "--wait=false"
+            ]
+          }
+        },
+        {
+          "type": "probe",
+          "name": "api-still-healthy-during-restart",
+          "provider": {
+            "type": "http",
+            "url": "http://localhost:8000/health",
+            "timeout": 10,
+            "expected_status": 200
+          }
+        },
+        {
+          "type": "probe",
+          "name": "fleet-still-accessible",
+          "provider": {
+            "type": "http",
+            "url": "http://localhost:8000/api/v1/fleet",
+            "headers": {"Authorization": "Bearer ${AUTH_TOKEN}"},
+            "timeout": 15,
+            "expected_status": 200
+          }
+        }
+      ],
+      "rollbacks": []
+    },
+
+    {
+      "title": "Redis failure degrades gracefully — no 500 errors",
+      "description": "When Redis is unavailable, the API should return degraded but valid responses (from DB), never 500.",
+      "tags": ["redis", "cache", "graceful-degradation"],
+      "steady-state-hypothesis": {
+        "title": "KPIs endpoint returns 200",
+        "probes": [
+          {
+            "type": "probe",
+            "name": "kpis-available",
+            "tolerance": 200,
+            "provider": {
+              "type": "http",
+              "url": "http://localhost:8000/api/v1/kpis",
+              "headers": {"Authorization": "Bearer ${AUTH_TOKEN}"},
+              "timeout": 10
+            }
+          }
+        ]
+      },
+      "method": [
+        {
+          "type": "action",
+          "name": "stop-redis",
+          "provider": {
+            "type": "process",
+            "path": "kubectl",
+            "arguments": ["scale", "deployment", "redis", "--replicas=0", "-n", "kmrl-production"]
+          }
+        },
+        {
+          "type": "probe",
+          "name": "sleep-for-redis-timeout",
+          "provider": {
+            "type": "process",
+            "path": "sleep",
+            "arguments": ["15"]
+          }
+        },
+        {
+          "type": "probe",
+          "name": "kpis-still-200-without-redis",
+          "provider": {
+            "type": "http",
+            "url": "http://localhost:8000/api/v1/kpis",
+            "headers": {"Authorization": "Bearer ${AUTH_TOKEN}"},
+            "timeout": 15,
+            "expected_status": 200
+          }
+        },
+        {
+          "type": "probe",
+          "name": "fleet-still-200-without-redis",
+          "provider": {
+            "type": "http",
+            "url": "http://localhost:8000/api/v1/fleet",
+            "headers": {"Authorization": "Bearer ${AUTH_TOKEN}"},
+            "timeout": 15,
+            "expected_status": 200
+          }
+        }
+      ],
+      "rollbacks": [
+        {
+          "type": "action",
+          "name": "restore-redis",
+          "provider": {
+            "type": "process",
+            "path": "kubectl",
+            "arguments": ["scale", "deployment", "redis", "--replicas=1", "-n", "kmrl-production"]
+          }
+        }
+      ]
+    },
+
+    {
+      "title": "Optimizer worker death triggers rescheduling",
+      "description": "If the Celery optimization worker dies mid-task, the nightly plan must still be generated via Beat rescheduling.",
+      "tags": ["celery", "worker", "fault-tolerance"],
+      "steady-state-hypothesis": {
+        "title": "Celery optimization queue processing",
+        "probes": [
+          {
+            "type": "probe",
+            "name": "optimizer-worker-running",
+            "tolerance": 0,
+            "provider": {
+              "type": "process",
+              "path": "kubectl",
+              "arguments": [
+                "get", "pods",
+                "-l", "app=kmrl-worker-optimization",
+                "-n", "kmrl-production",
+                "--field-selector=status.phase!=Running",
+                "-o", "name"
+              ]
+            }
+          }
+        ]
+      },
+      "method": [
+        {
+          "type": "action",
+          "name": "kill-optimizer-worker",
+          "provider": {
+            "type": "process",
+            "path": "kubectl",
+            "arguments": [
+              "delete", "pod",
+              "-l", "app=kmrl-worker-optimization",
+              "-n", "kmrl-production",
+              "--grace-period=0"
+            ]
+          }
+        },
+        {
+          "type": "probe",
+          "name": "wait-for-kubernetes-reschedule",
+          "provider": {
+            "type": "process",
+            "path": "sleep",
+            "arguments": ["30"]
+          }
+        },
+        {
+          "type": "probe",
+          "name": "worker-rescheduled",
+          "provider": {
+            "type": "process",
+            "path": "kubectl",
+            "arguments": [
+              "get", "pods",
+              "-l", "app=kmrl-worker-optimization",
+              "-n", "kmrl-production",
+              "--field-selector=status.phase=Running",
+              "-o", "name"
+            ]
+          }
+        }
+      ],
+      "rollbacks": []
+    },
+
+    {
+      "title": "Network partition: API can reach DB but not Kafka",
+      "description": "Core fleet queries must work even under partial network failure.",
+      "tags": ["network", "partition", "partial-failure"],
+      "steady-state-hypothesis": {
+        "title": "Fleet endpoint operational",
+        "probes": [
+          {
+            "type": "probe",
+            "name": "fleet-available",
+            "tolerance": 200,
+            "provider": {
+              "type": "http",
+              "url": "http://localhost:8000/api/v1/fleet",
+              "headers": {"Authorization": "Bearer ${AUTH_TOKEN}"},
+              "timeout": 10
+            }
+          }
+        ]
+      },
+      "method": [
+        {
+          "type": "action",
+          "name": "simulate-kafka-network-partition",
+          "provider": {
+            "type": "process",
+            "path": "kubectl",
+            "arguments": [
+              "apply", "-f", "-",
+              "--stdin"
+            ],
+            "stdin": "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: block-kafka-temp\n  namespace: kmrl-production\nspec:\n  podSelector:\n    matchLabels:\n      app: kmrl-api\n  policyTypes: [Egress]\n  egress:\n  - to:\n    - podSelector:\n        matchLabels:\n          app: postgres\n  - to:\n    - podSelector:\n        matchLabels:\n          app: redis\n"
+          }
+        },
+        {
+          "type": "probe",
+          "name": "sleep-for-partition",
+          "provider": {
+            "type": "process",
+            "path": "sleep",
+            "arguments": ["20"]
+          }
+        },
+        {
+          "type": "probe",
+          "name": "fleet-still-works-without-kafka",
+          "provider": {
+            "type": "http",
+            "url": "http://localhost:8000/api/v1/fleet",
+            "headers": {"Authorization": "Bearer ${AUTH_TOKEN}"},
+            "timeout": 15,
+            "expected_status": 200
+          }
+        }
+      ],
+      "rollbacks": [
+        {
+          "type": "action",
+          "name": "remove-network-policy",
+          "provider": {
+            "type": "process",
+            "path": "kubectl",
+            "arguments": ["delete", "networkpolicy", "block-kafka-temp", "-n", "kmrl-production"]
+          }
+        }
+      ]
+    }
+  ]
+}

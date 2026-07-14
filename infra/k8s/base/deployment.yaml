@@ -1,0 +1,500 @@
+# ============================================================
+# KMRL NexusAI — Kubernetes Manifests
+# Namespace: kmrl-production
+# ============================================================
+
+---
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kmrl-production
+  labels:
+    app.kubernetes.io/name: kmrl-nexusai
+    environment: production
+
+---
+# ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kmrl-config
+  namespace: kmrl-production
+data:
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "WARNING"
+  FLEET_SIZE: "25"
+  FLEET_SIZE_TARGET: "40"
+  OPTIMIZER_TIMEOUT_SECONDS: "30"
+  PLANNING_WINDOW_START_HOUR: "21"
+  KAFKA_TOPIC_TELEMETRY: "kmrl.trainset.telemetry"
+  KAFKA_TOPIC_ALERTS: "kmrl.alerts"
+  KAFKA_TOPIC_INDUCTION: "kmrl.induction.plans"
+
+---
+# Secret (in production use Vault or Sealed Secrets)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kmrl-secrets
+  namespace: kmrl-production
+type: Opaque
+stringData:
+  DATABASE_URL: "postgresql+asyncpg://kmrl:CHANGE_ME@postgres-svc:5432/kmrl_nexusai"
+  REDIS_URL: "redis://redis-svc:6379/0"
+  SECRET_KEY: "CHANGE_ME_USE_OPENSSL_RAND_HEX_32"
+  SMTP_PASSWORD: "CHANGE_ME"
+  WHATSAPP_API_TOKEN: "CHANGE_ME"
+
+---
+# ── API Deployment ────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kmrl-api
+  namespace: kmrl-production
+  labels:
+    app: kmrl-api
+    tier: backend
+    version: "2.4.1"
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: kmrl-api
+  template:
+    metadata:
+      labels:
+        app: kmrl-api
+        tier: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: kmrl-api-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: api
+          image: kmrl/nexusai-api:2.4.1
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: kmrl-config
+            - secretRef:
+                name: kmrl-secrets
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka-svc:9092"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+          volumeMounts:
+            - name: ml-models
+              mountPath: /app/models
+              readOnly: true
+      volumes:
+        - name: ml-models
+          persistentVolumeClaim:
+            claimName: ml-models-pvc
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: kmrl-api
+
+---
+# API Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: kmrl-api-svc
+  namespace: kmrl-production
+spec:
+  selector:
+    app: kmrl-api
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http
+  type: ClusterIP
+
+---
+# ── Worker Deployments ────────────────────────────────────────────
+
+# Optimization Worker
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kmrl-worker-optimization
+  namespace: kmrl-production
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kmrl-worker-optimization
+  template:
+    metadata:
+      labels:
+        app: kmrl-worker-optimization
+        tier: worker
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: worker
+          image: kmrl/nexusai-api:2.4.1
+          command:
+            - celery
+            - -A
+            - app.workers.celery_app
+            - worker
+            - -Q
+            - optimization
+            - -c
+            - "2"
+            - --loglevel=warning
+          envFrom:
+            - configMapRef:
+                name: kmrl-config
+            - secretRef:
+                name: kmrl-secrets
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "1Gi"
+            limits:
+              cpu: "4000m"
+              memory: "4Gi"
+          volumeMounts:
+            - name: ml-models
+              mountPath: /app/models
+      volumes:
+        - name: ml-models
+          persistentVolumeClaim:
+            claimName: ml-models-pvc
+
+---
+# ML Worker
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kmrl-worker-ml
+  namespace: kmrl-production
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kmrl-worker-ml
+  template:
+    metadata:
+      labels:
+        app: kmrl-worker-ml
+    spec:
+      containers:
+        - name: worker
+          image: kmrl/nexusai-api:2.4.1
+          command:
+            - celery
+            - -A
+            - app.workers.celery_app
+            - worker
+            - -Q
+            - ml
+            - -c
+            - "1"
+            - --loglevel=warning
+          envFrom:
+            - configMapRef:
+                name: kmrl-config
+            - secretRef:
+                name: kmrl-secrets
+          resources:
+            requests:
+              cpu: "2000m"
+              memory: "4Gi"
+            limits:
+              cpu: "8000m"
+              memory: "12Gi"
+          volumeMounts:
+            - name: ml-models
+              mountPath: /app/models
+      volumes:
+        - name: ml-models
+          persistentVolumeClaim:
+            claimName: ml-models-pvc
+
+---
+# Beat Scheduler (single replica, always)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kmrl-celery-beat
+  namespace: kmrl-production
+spec:
+  replicas: 1    # MUST be 1 — multiple beat instances will duplicate tasks
+  selector:
+    matchLabels:
+      app: kmrl-celery-beat
+  template:
+    metadata:
+      labels:
+        app: kmrl-celery-beat
+    spec:
+      containers:
+        - name: beat
+          image: kmrl/nexusai-api:2.4.1
+          command:
+            - celery
+            - -A
+            - app.workers.celery_app
+            - beat
+            - --loglevel=warning
+          envFrom:
+            - configMapRef:
+                name: kmrl-config
+            - secretRef:
+                name: kmrl-secrets
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+---
+# ── Frontend Deployment ───────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kmrl-frontend
+  namespace: kmrl-production
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kmrl-frontend
+  template:
+    metadata:
+      labels:
+        app: kmrl-frontend
+        tier: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: kmrl/nexusai-frontend:2.4.1
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NEXT_PUBLIC_API_URL
+              value: "https://api.nexusai.kmrl.in"
+            - name: NEXT_PUBLIC_WS_URL
+              value: "wss://api.nexusai.kmrl.in"
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+---
+# Frontend Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: kmrl-frontend-svc
+  namespace: kmrl-production
+spec:
+  selector:
+    app: kmrl-frontend
+  ports:
+    - port: 3000
+      targetPort: 3000
+  type: ClusterIP
+
+---
+# ── Ingress ───────────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kmrl-ingress
+  namespace: kmrl-production
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - nexusai.kmrl.in
+        - api.nexusai.kmrl.in
+      secretName: kmrl-tls
+  rules:
+    - host: nexusai.kmrl.in
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kmrl-frontend-svc
+                port:
+                  number: 3000
+    - host: api.nexusai.kmrl.in
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kmrl-api-svc
+                port:
+                  number: 8000
+
+---
+# ── HPA (Horizontal Pod Autoscaler) ───────────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: kmrl-api-hpa
+  namespace: kmrl-production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kmrl-api
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+---
+# ── PersistentVolumeClaim ─────────────────────────────────────────
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ml-models-pvc
+  namespace: kmrl-production
+spec:
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: standard
+
+---
+# ── ServiceAccount ────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kmrl-api-sa
+  namespace: kmrl-production
+
+---
+# ── Network Policy ────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kmrl-api-netpol
+  namespace: kmrl-production
+spec:
+  podSelector:
+    matchLabels:
+      app: kmrl-api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: kmrl-frontend
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              app: kafka
+      ports:
+        - port: 9092
+    # Allow DNS
+    - ports:
+        - port: 53
+          protocol: UDP

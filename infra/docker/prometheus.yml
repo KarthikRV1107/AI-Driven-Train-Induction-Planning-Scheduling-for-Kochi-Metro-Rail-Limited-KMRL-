@@ -1,0 +1,94 @@
+# ============================================================
+# KMRL NexusAI — Prometheus Configuration
+# ============================================================
+
+global:
+  scrape_interval:     30s
+  evaluation_interval: 30s
+  scrape_timeout:      10s
+  external_labels:
+    environment: production
+    platform:    kmrl-nexusai
+
+# ── Alerting Rules ────────────────────────────────────────────────────────
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+# ── Alertmanager ──────────────────────────────────────────────────────────
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+# ── Scrape Configs ────────────────────────────────────────────────────────
+scrape_configs:
+
+  # FastAPI backend
+  - job_name: kmrl-api
+    static_configs:
+      - targets: ['kmrl-api:8000']
+    metrics_path: /metrics
+    scrape_interval: 15s
+
+  # Celery workers (via Flower)
+  - job_name: celery-flower
+    static_configs:
+      - targets: ['kmrl-flower:5555']
+    metrics_path: /metrics
+
+  # PostgreSQL exporter
+  - job_name: postgres
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+
+  # Redis exporter
+  - job_name: redis
+    static_configs:
+      - targets: ['redis-exporter:9121']
+
+  # Kafka exporter
+  - job_name: kafka
+    static_configs:
+      - targets: ['kafka-exporter:9308']
+
+  # Node exporter (host metrics)
+  - job_name: node
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # Kubernetes API
+  - job_name: kubernetes-apiservers
+    kubernetes_sd_configs:
+      - role: endpoints
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+        action: keep
+        regex: default;kubernetes;https
+
+  # Auto-discover K8s pods with prometheus.io/scrape=true
+  - job_name: kubernetes-pods
+    kubernetes_sd_configs:
+      - role: pod
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: "true"
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: kubernetes_namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: kubernetes_pod_name

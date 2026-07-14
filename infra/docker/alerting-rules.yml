@@ -1,0 +1,250 @@
+# ============================================================
+# KMRL NexusAI — Prometheus Alerting Rules
+# ============================================================
+# Deploy: kubectl apply -f infra/docker/alerting-rules.yaml
+# Or mount as /etc/prometheus/rules/kmrl-rules.yml
+
+groups:
+
+  # ── Fleet Operations ────────────────────────────────────────────────────
+  - name: kmrl.fleet
+    interval: 30s
+    rules:
+
+      - alert: FleetAvailabilityLow
+        expr: kmrl_fleet_availability_pct < 85
+        for: 5m
+        labels:
+          severity: critical
+          team:     operations
+          channel:  pagerduty
+        annotations:
+          summary:     "Fleet availability below 85% (current: {{ $value }}%)"
+          description: "Fleet availability has been below 85% for 5 minutes. Investigate trainset withdrawals or certification issues."
+          runbook:     "https://docs.nexusai.kmrl.in/runbooks/fleet-availability"
+          dashboard:   "https://grafana.nexusai.kmrl.in/d/kmrl-ops"
+
+      - alert: RevenueServiceCountLow
+        expr: kmrl_revenue_service_count < 15
+        for: 2m
+        labels:
+          severity: critical
+          team:     operations
+        annotations:
+          summary:     "Revenue service count critically low: {{ $value }} trainsets"
+          description: "Less than 15 trainsets in revenue service. Minimum is 18. Activate standby fleet immediately."
+
+      - alert: CriticalAlertsSpike
+        expr: kmrl_active_alerts_total{severity="critical"} > 3
+        for: 1m
+        labels:
+          severity: warning
+          team:     operations
+        annotations:
+          summary:     "{{ $value }} critical operational alerts active"
+          description: "More than 3 simultaneous critical alerts detected. Review in platform dashboard."
+
+  # ── AI Optimization ──────────────────────────────────────────────────────
+  - name: kmrl.optimization
+    interval: 60s
+    rules:
+
+      - alert: OptimizerSolveTimeSlow
+        expr: histogram_quantile(0.95, rate(kmrl_optimization_duration_seconds_bucket[10m])) > 25
+        for: 10m
+        labels:
+          severity: warning
+          team:     ai-platform
+        annotations:
+          summary:     "Optimizer p95 solve time exceeding 25s (current: {{ $value | humanizeDuration }})"
+          description: "The OR-Tools optimizer is running slower than expected. Check for fleet size changes or resource contention."
+
+      - alert: OptimizationScoreDegraded
+        expr: kmrl_optimization_score < 75
+        for: 15m
+        labels:
+          severity: warning
+          team:     ai-platform
+        annotations:
+          summary:     "Induction plan optimization score low: {{ $value }}/100"
+          description: "Optimizer score has been below 75 for 15 minutes. Review constraint violations and fleet health."
+
+      - alert: ShuntingOpsHigh
+        expr: kmrl_shunting_ops_tonight > 20
+        for: 5m
+        labels:
+          severity: info
+          team:     operations
+        annotations:
+          summary:     "High shunting operation count tonight: {{ $value }}"
+          description: "More than 20 shunting operations planned. Consider running optimizer with shunting minimization weight increase."
+
+  # ── Machine Learning ──────────────────────────────────────────────────────
+  - name: kmrl.ml
+    interval: 60s
+    rules:
+
+      - alert: MLPredictionLatencyHigh
+        expr: histogram_quantile(0.95, rate(kmrl_ml_prediction_duration_seconds_bucket[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          team:     ai-platform
+        annotations:
+          summary:     "ML prediction p95 latency high: {{ $value | humanizeDuration }}"
+          description: "XGBoost/PyTorch inference taking longer than 500ms p95. Check model server resources."
+
+      - alert: ModelDriftDetected
+        expr: kmrl_model_drift_psi > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          team:     ai-platform
+        annotations:
+          summary:     "Model drift detected: PSI={{ $value }} for {{ $labels.model }}"
+          description: "Population Stability Index exceeds 0.2 for {{ $labels.model }}. Model retraining has been triggered automatically."
+
+      - alert: HighFleetFailureRisk
+        expr: max(kmrl_ml_failure_risk) > 0.8
+        for: 2m
+        labels:
+          severity: critical
+          team:     maintenance
+        annotations:
+          summary:     "Trainset with >80% AI failure risk detected"
+          description: "At least one trainset has composite failure risk above 80%. Immediate IBL assignment recommended."
+
+  # ── Infrastructure ────────────────────────────────────────────────────────
+  - name: kmrl.infrastructure
+    interval: 30s
+    rules:
+
+      - alert: APIHighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          team:     platform
+        annotations:
+          summary:     "API error rate above 1% (current: {{ $value | humanizePercentage }})"
+          description: "HTTP 5xx error rate has exceeded 1% for 5 minutes. Immediate investigation required."
+
+      - alert: APIHighLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 10m
+        labels:
+          severity: warning
+          team:     platform
+        annotations:
+          summary:     "API p95 latency high: {{ $value | humanizeDuration }}"
+          description: "API response time p95 exceeds 2 seconds. Check database connection pool and cache hit rates."
+
+      - alert: KafkaConsumerLagging
+        expr: kmrl_kafka_consumer_lag > 1000
+        for: 5m
+        labels:
+          severity: warning
+          team:     platform
+        annotations:
+          summary:     "Kafka consumer lag: {{ $value }} messages on {{ $labels.topic }}"
+          description: "Consumer lag exceeds 1000 messages. Telemetry processing may be delayed."
+
+      - alert: WebSocketConnectionsDrop
+        expr: delta(kmrl_websocket_connections_active[5m]) < -10
+        for: 2m
+        labels:
+          severity: info
+          team:     platform
+        annotations:
+          summary:     "WebSocket connections dropped by {{ $value }}"
+          description: "Significant drop in active WebSocket connections. Dashboard users may be experiencing disconnections."
+
+      - alert: PodRestartingFrequently
+        expr: increase(kube_pod_container_status_restarts_total{namespace="kmrl-production"}[1h]) > 3
+        for: 5m
+        labels:
+          severity: warning
+          team:     platform
+        annotations:
+          summary:     "Pod {{ $labels.pod }} restarting frequently ({{ $value }} restarts/hour)"
+          description: "Container crash loop detected. Check logs: kubectl logs {{ $labels.pod }} -n kmrl-production"
+
+      - alert: PersistentVolumeAlmostFull
+        expr: (1 - kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          team:     platform
+        annotations:
+          summary:     "PVC {{ $labels.persistentvolumeclaim }} is 85% full"
+          description: "Persistent volume is running low on space. Expand or clean up data."
+
+      - alert: DatabaseConnectionPoolExhausted
+        expr: pg_stat_activity_count > 18
+        for: 2m
+        labels:
+          severity: critical
+          team:     platform
+        annotations:
+          summary:     "PostgreSQL connection pool near capacity: {{ $value }}/20 connections"
+          description: "Database connection pool approaching limit. API requests may start failing."
+
+  # ── Security ──────────────────────────────────────────────────────────────
+  - name: kmrl.security
+    interval: 60s
+    rules:
+
+      - alert: HighAuthFailureRate
+        expr: rate(http_requests_total{path="/api/v1/auth/token",status="401"}[5m]) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+          team:     security
+        annotations:
+          summary:     "High authentication failure rate: {{ $value }} failures/sec"
+          description: "Possible brute force attack on login endpoint. Rate limiting should engage automatically."
+
+      - alert: VaultUnavailable
+        expr: up{job="vault"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team:     security
+        annotations:
+          summary:     "HashiCorp Vault is unreachable"
+          description: "Vault is down. Dynamic secret rotation and PII encryption unavailable. System operating on cached/env credentials."
+
+      - alert: CertificateExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 30
+        for: 1h
+        labels:
+          severity: warning
+          team:     platform
+        annotations:
+          summary:     "TLS certificate expiring in {{ $value | humanizeDuration }}"
+          description: "Platform TLS certificate will expire soon. Renew via cert-manager or Let's Encrypt."
+
+  # ── Business SLAs ─────────────────────────────────────────────────────────
+  - name: kmrl.sla
+    interval: 300s
+    rules:
+
+      - alert: BrandingSLAAtRisk
+        expr: kmrl_active_alerts_total{alert_code="BRANDING_SLA"} > 0
+        for: 10m
+        labels:
+          severity: info
+          team:     commercial
+        annotations:
+          summary:     "Branding contract SLA compliance at risk"
+          description: "One or more branding contracts are below weekly exposure targets. Prioritize affected trainsets for revenue service."
+
+      - alert: NightlyPlanNotGenerated
+        expr: time() - kmrl_last_plan_generated_timestamp > 7200
+        for: 5m
+        labels:
+          severity: critical
+          team:     operations
+        annotations:
+          summary:     "Nightly induction plan not generated in last 2 hours"
+          description: "The optimizer has not produced a plan since {{ $value | humanizeTimestamp }}. Manual planning may be required for morning service."

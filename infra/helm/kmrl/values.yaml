@@ -1,0 +1,218 @@
+# ============================================================
+# KMRL NexusAI — Helm Chart Values (Base)
+# Override with values-staging.yaml / values-production.yaml
+# ============================================================
+
+nameOverride: "kmrl-nexusai"
+fullnameOverride: "kmrl-nexusai"
+
+# ── Global ────────────────────────────────────────────────────────
+global:
+  imageRegistry: "ghcr.io/kmrl"
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets:
+    - name: ghcr-pull-secret
+
+environment: production
+
+# ── Image Tags ────────────────────────────────────────────────────
+image:
+  api:
+    repository: nexusai-api
+    tag: "2.4.1"
+  frontend:
+    repository: nexusai-frontend
+    tag: "2.4.1"
+
+# ── Replica Counts ────────────────────────────────────────────────
+replicaCount:
+  api: 3
+  frontend: 2
+  workerOptimization: 2
+  workerMl: 1
+  workerAlerts: 2
+  celeryBeat: 1   # MUST stay 1
+
+# ── API Config ────────────────────────────────────────────────────
+api:
+  port: 8000
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+
+# ── Frontend Config ───────────────────────────────────────────────
+frontend:
+  port: 3000
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+# ── Workers ───────────────────────────────────────────────────────
+workers:
+  optimization:
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 1Gi
+      limits:
+        cpu: 4000m
+        memory: 4Gi
+  ml:
+    resources:
+      requests:
+        cpu: 2000m
+        memory: 4Gi
+      limits:
+        cpu: 8000m
+        memory: 12Gi
+  alerts:
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+# ── Ingress ───────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+  host: nexusai.kmrl.in
+  apiHost: api.nexusai.kmrl.in
+  tls:
+    enabled: true
+    certManager:
+      enabled: true
+      issuer: letsencrypt-prod
+
+# ── PostgreSQL (Bitnami sub-chart) ────────────────────────────────
+postgresql:
+  enabled: true   # set false if using external managed DB
+  auth:
+    database: kmrl_nexusai
+    username: kmrl
+    existingSecret: kmrl-postgres-secret
+  primary:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+    persistence:
+      enabled: true
+      size: 100Gi
+      storageClass: "gp3"
+  metrics:
+    enabled: true
+
+# ── Redis (Bitnami sub-chart) ────────────────────────────────────
+redis:
+  enabled: true
+  auth:
+    enabled: true
+    existingSecret: kmrl-redis-secret
+  master:
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+    persistence:
+      enabled: true
+      size: 10Gi
+
+# ── Kafka (Bitnami sub-chart) ─────────────────────────────────────
+kafka:
+  enabled: true
+  replicaCount: 3
+  persistence:
+    size: 50Gi
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+
+# ── Persistent Volume Claims ──────────────────────────────────────
+persistence:
+  mlModels:
+    enabled: true
+    size: 20Gi
+    storageClass: "gp3"
+    accessMode: ReadWriteMany
+
+# ── Service Account ───────────────────────────────────────────────
+serviceAccount:
+  create: true
+  name: "kmrl-api-sa"
+  annotations: {}
+
+# ── Security Context ──────────────────────────────────────────────
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# ── Pod Disruption Budget ─────────────────────────────────────────
+podDisruptionBudget:
+  api:
+    minAvailable: 2
+  frontend:
+    minAvailable: 1
+
+# ── Monitoring ────────────────────────────────────────────────────
+monitoring:
+  enabled: true
+  prometheus:
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+  grafana:
+    dashboards:
+      enabled: true
+
+# ── Network Policy ────────────────────────────────────────────────
+networkPolicy:
+  enabled: true
+
+# ── Config ────────────────────────────────────────────────────────
+config:
+  fleetSize: 25
+  fleetSizeTarget: 40
+  optimizerTimeoutSeconds: 30
+  planningWindowStartHour: 21
+  logLevel: WARNING
+
+# ── Secrets (values injected from Vault / GitHub Secrets) ────────
+secrets:
+  existingSecret: kmrl-secrets
+  keys:
+    databaseUrl: DATABASE_URL
+    redisUrl: REDIS_URL
+    secretKey: SECRET_KEY
+    smtpPassword: SMTP_PASSWORD
+    whatsappToken: WHATSAPP_API_TOKEN

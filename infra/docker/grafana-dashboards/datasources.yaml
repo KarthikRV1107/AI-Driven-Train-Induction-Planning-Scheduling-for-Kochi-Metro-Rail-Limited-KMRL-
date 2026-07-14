@@ -1,0 +1,48 @@
+# ============================================================
+# KMRL NexusAI — Grafana Provisioning Configuration
+# Mount directory: /etc/grafana/provisioning/
+# ============================================================
+
+# ── datasources/datasources.yaml ─────────────────────────────────────────
+# (save as infra/docker/grafana-dashboards/datasources.yaml)
+
+apiVersion: 1
+datasources:
+  - name:    Prometheus
+    type:    prometheus
+    uid:     prometheus-uid
+    url:     http://prometheus:9090
+    access:  proxy
+    isDefault: true
+    jsonData:
+      httpMethod:        POST
+      timeInterval:      15s
+      exemplarTraceIdDestinations:
+        - name:          trace_id
+          datasourceUid: jaeger-uid
+    editable: true
+
+  - name:    Jaeger
+    type:    jaeger
+    uid:     jaeger-uid
+    url:     http://jaeger:16686
+    access:  proxy
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki-uid
+        filterByTraceID: true
+    editable: true
+
+  - name:    PostgreSQL
+    type:    postgres
+    uid:     postgres-uid
+    url:     postgres-svc:5432
+    database: kmrl_nexusai
+    user:    kmrl_readonly
+    secureJsonData:
+      password: "${GF_DATASOURCE_POSTGRES_PASSWORD}"
+    jsonData:
+      sslmode: disable
+      maxOpenConns: 5
+      maxIdleConns: 5
+    editable: false

@@ -1,0 +1,403 @@
+version: "3.9"
+
+# ============================================================
+# KMRL NexusAI — Docker Compose (Development + Production)
+# ============================================================
+# Usage:
+#   Development:  docker-compose up -d
+#   Production:   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "50m"
+    max-file: "5"
+
+x-common-env: &common-env
+  DATABASE_URL: postgresql+asyncpg://kmrl:kmrl_secret@postgres:5432/kmrl_nexusai
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/1
+  CELERY_RESULT_BACKEND: redis://redis:6379/2
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  ML_MODEL_PATH: /app/models
+  LOG_LEVEL: INFO
+
+networks:
+  kmrl-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres-data:
+  redis-data:
+  kafka-data:
+  zookeeper-data:
+  ml-models:
+  minio-data:
+  prometheus-data:
+  grafana-data:
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: kmrl-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: kmrl_nexusai
+      POSTGRES_USER: kmrl
+      POSTGRES_PASSWORD: kmrl_secret
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./backend/app/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./scripts/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - kmrl-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kmrl -d kmrl_nexusai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *default-logging
+
+  # ── Redis ───────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: kmrl-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --appendonly yes
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - kmrl-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    logging: *default-logging
+
+  # ── Zookeeper (Kafka dep) ───────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: kmrl-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_MAX_CLIENT_CNXNS: 0
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+    networks:
+      - kmrl-net
+    logging: *default-logging
+
+  # ── Apache Kafka ────────────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kmrl-kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    ports:
+      - "29092:29092"
+    networks:
+      - kmrl-net
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    logging: *default-logging
+
+  # ── Kafka Topic Init ────────────────────────────────────────────
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kmrl-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: >
+      bash -c "
+        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic kmrl.trainset.telemetry --replication-factor 1 --partitions 6 &&
+        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic kmrl.alerts --replication-factor 1 --partitions 3 &&
+        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic kmrl.induction.plans --replication-factor 1 --partitions 2 &&
+        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic kmrl.maintenance.events --replication-factor 1 --partitions 3 &&
+        echo 'Kafka topics created successfully'
+      "
+    networks:
+      - kmrl-net
+
+  # ── Kafka UI ────────────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kmrl-kafka-ui
+    restart: unless-stopped
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_CLUSTERS_0_NAME: kmrl-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    ports:
+      - "8080:8080"
+    networks:
+      - kmrl-net
+
+  # ── FastAPI Backend ─────────────────────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: ../infra/docker/Dockerfile.api
+      target: development
+    container_name: kmrl-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      ENVIRONMENT: development
+      DEBUG: "true"
+      SECRET_KEY: "dev-secret-key-change-in-production-minimum-32-chars"
+    volumes:
+      - ./backend:/app
+      - ml-models:/app/models
+    ports:
+      - "8000:8000"
+    networks:
+      - kmrl-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging: *default-logging
+
+  # ── Celery Worker (Optimization) ────────────────────────────────
+  worker-optimization:
+    build:
+      context: ./backend
+      dockerfile: ../infra/docker/Dockerfile.api
+      target: development
+    container_name: kmrl-worker-opt
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app worker -Q optimization -c 2 --loglevel=info
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    environment:
+      <<: *common-env
+    volumes:
+      - ./backend:/app
+      - ml-models:/app/models
+    networks:
+      - kmrl-net
+    logging: *default-logging
+
+  # ── Celery Worker (ML) ──────────────────────────────────────────
+  worker-ml:
+    build:
+      context: ./backend
+      dockerfile: ../infra/docker/Dockerfile.api
+      target: development
+    container_name: kmrl-worker-ml
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app worker -Q ml -c 1 --loglevel=info
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      <<: *common-env
+    volumes:
+      - ./backend:/app
+      - ml-models:/app/models
+    networks:
+      - kmrl-net
+    logging: *default-logging
+
+  # ── Celery Worker (Alerts + Telemetry) ─────────────────────────
+  worker-alerts:
+    build:
+      context: ./backend
+      dockerfile: ../infra/docker/Dockerfile.api
+      target: development
+    container_name: kmrl-worker-alerts
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app worker -Q alerts,telemetry -c 4 --loglevel=info
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    environment:
+      <<: *common-env
+    volumes:
+      - ./backend:/app
+    networks:
+      - kmrl-net
+    logging: *default-logging
+
+  # ── Celery Beat Scheduler ───────────────────────────────────────
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: ../infra/docker/Dockerfile.api
+      target: development
+    container_name: kmrl-celery-beat
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app beat --loglevel=info
+    depends_on:
+      - redis
+    environment:
+      <<: *common-env
+    volumes:
+      - ./backend:/app
+    networks:
+      - kmrl-net
+    logging: *default-logging
+
+  # ── Flower (Celery Monitor) ─────────────────────────────────────
+  flower:
+    build:
+      context: ./backend
+      dockerfile: ../infra/docker/Dockerfile.api
+      target: development
+    container_name: kmrl-flower
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app flower --port=5555 --basic_auth=admin:kmrl2025
+    depends_on:
+      - redis
+    environment:
+      <<: *common-env
+    ports:
+      - "5555:5555"
+    networks:
+      - kmrl-net
+
+  # ── Next.js Frontend ────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../infra/docker/Dockerfile.frontend
+      target: development
+    container_name: kmrl-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_WS_URL: ws://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3000:3000"
+    networks:
+      - kmrl-net
+    logging: *default-logging
+
+  # ── NGINX Reverse Proxy ─────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: kmrl-nginx
+    restart: unless-stopped
+    depends_on:
+      - api
+      - frontend
+    volumes:
+      - ./infra/docker/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/docker/nginx-ssl:/etc/nginx/ssl:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - kmrl-net
+    logging: *default-logging
+
+  # ── MinIO (Object Storage for ML models, reports) ───────────────
+  minio:
+    image: minio/minio:latest
+    container_name: kmrl-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: kmrl_admin
+      MINIO_ROOT_PASSWORD: kmrl_minio_secret
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - kmrl-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # ── Prometheus ──────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: kmrl-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./infra/docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+    ports:
+      - "9090:9090"
+    networks:
+      - kmrl-net
+
+  # ── Grafana ─────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: kmrl-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: kmrl_grafana
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: http://localhost:3001
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/docker/grafana-dashboards:/etc/grafana/provisioning/dashboards:ro
+    ports:
+      - "3001:3000"
+    networks:
+      - kmrl-net
+    depends_on:
+      - prometheus

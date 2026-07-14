@@ -1,0 +1,468 @@
+# ============================================================
+# KMRL NexusAI — HashiCorp Vault + Keycloak Deployment
+# ============================================================
+
+---
+# ── Vault Namespace ───────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vault-system
+  labels:
+    app.kubernetes.io/name: vault
+
+---
+# ── Vault ConfigMap ───────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-config
+  namespace: vault-system
+data:
+  vault.hcl: |
+    ui = true
+    cluster_name = "kmrl-nexusai"
+
+    storage "raft" {
+      path    = "/vault/data"
+      node_id = "vault-0"
+      
+      retry_join {
+        leader_api_addr = "https://vault-1.vault-internal:8200"
+      }
+      retry_join {
+        leader_api_addr = "https://vault-2.vault-internal:8200"
+      }
+    }
+
+    listener "tcp" {
+      address       = "0.0.0.0:8200"
+      tls_cert_file = "/vault/tls/vault.crt"
+      tls_key_file  = "/vault/tls/vault.key"
+      telemetry {
+        unauthenticated_metrics_access = false
+      }
+    }
+
+    seal "awskms" {
+      region     = "ap-south-1"
+      kms_key_id = "alias/kmrl-vault-unseal"
+    }
+
+    telemetry {
+      statsite_address            = "statsd:9125"
+      disable_hostname            = true
+      prometheus_retention_time   = "30s"
+      unauthenticated_metrics_access = false
+    }
+
+    api_addr     = "https://vault.vault-system.svc.cluster.local:8200"
+    cluster_addr = "https://$(POD_IP):8201"
+    log_level    = "Warn"
+    log_format   = "json"
+
+---
+# ── Vault StatefulSet ──────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vault
+  namespace: vault-system
+  labels:
+    app: vault
+spec:
+  replicas: 3
+  serviceName: vault-internal
+  selector:
+    matchLabels:
+      app: vault
+  updateStrategy:
+    type: OnDelete   # manual rolling update for Raft safety
+  template:
+    metadata:
+      labels:
+        app: vault
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "8200"
+        prometheus.io/path:   "/v1/sys/metrics?format=prometheus"
+    spec:
+      serviceAccountName: vault-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser:    1000
+        fsGroup:      1000
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: vault
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: vault
+          image: hashicorp/vault:1.17.0
+          ports:
+            - containerPort: 8200
+              name: vault-port
+            - containerPort: 8201
+              name: cluster-port
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: VAULT_K8S_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: VAULT_K8S_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: VAULT_ADDR
+              value: "https://127.0.0.1:8200"
+            - name: VAULT_CLUSTER_ADDR
+              value: "https://$(POD_IP):8201"
+            - name: VAULT_RAFT_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: AWS_REGION
+              value: "ap-south-1"
+          args:
+            - "server"
+            - "-config=/vault/config/vault.hcl"
+          resources:
+            requests: { cpu: "500m",  memory: "256Mi" }
+            limits:   { cpu: "2000m", memory: "1Gi"  }
+          readinessProbe:
+            httpGet:
+              path:   /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
+              port:   8200
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path:   /v1/sys/health?standbyok=true
+              port:   8200
+              scheme: HTTPS
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          volumeMounts:
+            - name: config
+              mountPath: /vault/config
+            - name: data
+              mountPath: /vault/data
+            - name: tls
+              mountPath: /vault/tls
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: vault-config
+        - name: tls
+          secret:
+            secretName: vault-tls
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: premium-ssd
+        resources:
+          requests:
+            storage: 10Gi
+
+---
+# ── Vault Services ────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault
+  namespace: vault-system
+spec:
+  selector:
+    app: vault
+  ports:
+    - port: 8200
+      targetPort: 8200
+      name: vault
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault-internal
+  namespace: vault-system
+spec:
+  clusterIP: None   # headless for Raft peer discovery
+  selector:
+    app: vault
+  ports:
+    - port: 8200
+      name: vault
+    - port: 8201
+      name: cluster
+
+---
+# ── Vault ServiceAccount + RBAC ───────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vault-sa
+  namespace: vault-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vault-auth-delegator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind:     ClusterRole
+  name:     system:auth-delegator
+subjects:
+  - kind:      ServiceAccount
+    name:      vault-sa
+    namespace: vault-system
+
+---
+# ── Vault Initialization Script (Job) ────────────────────────────────────
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vault-init
+  namespace: vault-system
+spec:
+  backoffLimit: 5
+  template:
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: vault-sa
+      containers:
+        - name: vault-init
+          image: hashicorp/vault:1.17.0
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              export VAULT_ADDR=https://vault.vault-system.svc.cluster.local:8200
+              export VAULT_SKIP_VERIFY=true
+
+              # Wait for Vault to be ready
+              until vault status 2>&1 | grep -q "Initialized"; do sleep 3; done
+
+              # Initialize if not already done
+              if vault status | grep -q "Initialized.*false"; then
+                vault operator init -key-shares=1 -key-threshold=1 \
+                  -format=json > /tmp/vault-init.json
+                echo "Vault initialized"
+              fi
+
+              # Enable Kubernetes auth
+              vault auth enable kubernetes || true
+              vault write auth/kubernetes/config \
+                kubernetes_host=https://kubernetes.default.svc \
+                token_reviewer_jwt="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" \
+                kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+
+              # Create KMRL API policy
+              vault policy write kmrl-api - <<EOF
+              path "secret/data/kmrl/*" { capabilities = ["read"] }
+              path "database/creds/kmrl-api-role" { capabilities = ["read"] }
+              path "transit/encrypt/kmrl-pii" { capabilities = ["create", "update"] }
+              path "transit/decrypt/kmrl-pii" { capabilities = ["create", "update"] }
+              EOF
+
+              # Bind K8s service account to policy
+              vault write auth/kubernetes/role/kmrl-api \
+                bound_service_account_names=kmrl-api-sa \
+                bound_service_account_namespaces=kmrl-production \
+                policies=kmrl-api \
+                ttl=1h
+
+              # Enable database secrets engine
+              vault secrets enable database || true
+              vault write database/config/kmrl-postgres \
+                plugin_name=postgresql-database-plugin \
+                allowed_roles=kmrl-api-role \
+                connection_url="postgresql://{{username}}:{{password}}@postgres-svc.kmrl-production.svc.cluster.local:5432/kmrl_nexusai" \
+                username=vault_admin \
+                password=${POSTGRES_VAULT_PASSWORD}
+
+              vault write database/roles/kmrl-api-role \
+                db_name=kmrl-postgres \
+                creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}'; GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO \"{{name}}\"; GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO \"{{name}}\";" \
+                revocation_statements="REVOKE ALL ON ALL TABLES IN SCHEMA public FROM \"{{name}}\"; DROP ROLE IF EXISTS \"{{name}}\";" \
+                default_ttl=1h \
+                max_ttl=24h
+
+              # Enable transit secrets engine for PII encryption
+              vault secrets enable transit || true
+              vault write transit/keys/kmrl-pii type=aes256-gcm96
+
+              # Store static secrets
+              vault secrets enable -path=secret kv-v2 || true
+              vault kv put secret/kmrl/api \
+                SECRET_KEY="${SECRET_KEY}" \
+                APP_VERSION=2.4.1
+
+              echo "Vault configuration complete"
+
+---
+# ============================================================
+# Keycloak Deployment
+# ============================================================
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: keycloak-system
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm
+  namespace: keycloak-system
+data:
+  kmrl-realm.json: |
+    {
+      "realm": "kmrl",
+      "displayName": "KMRL NexusAI",
+      "enabled": true,
+      "sslRequired": "external",
+      "accessTokenLifespan": 3600,
+      "bruteForceProtected": true,
+      "failureFactor": 5,
+      "otpPolicyType": "totp",
+      "otpPolicyDigits": 6,
+      "otpPolicyPeriod": 30,
+      "passwordPolicy": "length(12) and upperCase(1) and specialChars(1)",
+      "clients": [{
+        "clientId": "kmrl-nexusai",
+        "enabled": true,
+        "protocol": "openid-connect",
+        "standardFlowEnabled": true,
+        "directAccessGrantsEnabled": true,
+        "serviceAccountsEnabled": true,
+        "redirectUris": ["https://nexusai.kmrl.in/*"],
+        "webOrigins": ["https://nexusai.kmrl.in"]
+      }]
+    }
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: keycloak
+  namespace: keycloak-system
+spec:
+  replicas: 2
+  serviceName: keycloak-headless
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:24.0.3
+          args: ["start", "--optimized"]
+          env:
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL
+              value: jdbc:postgresql://postgres-svc.kmrl-production.svc.cluster.local:5432/keycloak
+            - name: KC_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-db-secret
+                  key: username
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-db-secret
+                  key: password
+            - name: KC_HOSTNAME
+              value: sso.nexusai.kmrl.in
+            - name: KC_PROXY
+              value: edge
+            - name: KEYCLOAK_ADMIN
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin-secret
+                  key: username
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin-secret
+                  key: password
+            - name: KC_CACHE
+              value: ispn
+            - name: KC_CACHE_STACK
+              value: kubernetes
+            - name: JAVA_OPTS_APPEND
+              value: "-Djgroups.dns.query=keycloak-headless.keycloak-system.svc.cluster.local"
+            - name: KC_METRICS_ENABLED
+              value: "true"
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 7600
+              name: jgroups
+          resources:
+            requests: { cpu: "500m",  memory: "512Mi" }
+            limits:   { cpu: "2000m", memory: "1Gi"  }
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8080
+            initialDelaySeconds: 120
+            periodSeconds: 30
+          volumeMounts:
+            - name: realm-config
+              mountPath: /opt/keycloak/data/import
+      volumes:
+        - name: realm-config
+          configMap:
+            name: keycloak-realm
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: keycloak-system
+spec:
+  selector:
+    app: keycloak
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-headless
+  namespace: keycloak-system
+spec:
+  clusterIP: None
+  selector:
+    app: keycloak
+  ports:
+    - port: 8080
+    - port: 7600

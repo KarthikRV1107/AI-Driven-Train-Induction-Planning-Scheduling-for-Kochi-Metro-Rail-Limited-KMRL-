@@ -1,0 +1,394 @@
+# ============================================================
+# KMRL NexusAI — Multi-Region Active-Active Architecture
+# Regions: India South (Primary) · India West (DR)
+# ============================================================
+
+# ── Global Traffic Manager (Cloudflare / AWS Route53) ──────────────────
+# Traffic distribution: 70% primary, 30% DR (failover in <60s)
+
+---
+# ── Primary Region: India South (Kochi / Mumbai) ───────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kmrl-production
+  labels:
+    region: india-south
+    tier:   primary
+
+---
+# Global Config for cross-region sync
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kmrl-global-config
+  namespace: kmrl-production
+data:
+  REGION:           "india-south"
+  ROLE:             "primary"
+  PEER_REGION:      "india-west"
+  SYNC_ENABLED:     "true"
+  OPTIMIZER_MODE:   "distributed"     # each region can run optimizer
+  ML_SYNC_MODE:     "read-replica"    # models trained on primary, served everywhere
+
+---
+# ── CockroachDB Operator (Multi-Region PostgreSQL) ─────────────────────
+# CockroachDB provides distributed SQL with automatic geo-partitioning
+apiVersion: crdb.cockroachlabs.com/v1alpha1
+kind: CrdbCluster
+metadata:
+  name: kmrl-db
+  namespace: kmrl-production
+spec:
+  dataStore:
+    pvc:
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 200Gi
+        storageClassName: premium-ssd
+  nodes: 6                            # 3 per region
+  tlsEnabled: true
+  cockroachDBVersion: v23.2.0
+  nodeSelector:
+    topology.kubernetes.io/region: india-south
+  tolerations:
+    - key: "database"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+
+---
+# ── Redis Sentinel (HA Cache) ─────────────────────────────────────────
+apiVersion: redis.redis.opstreelabs.in/v1beta2
+kind: RedisReplication
+metadata:
+  name: kmrl-redis
+  namespace: kmrl-production
+spec:
+  clusterSize: 3
+  redisLeader:
+    redisConfig:
+      additionalRedisConfig: |
+        maxmemory 1gb
+        maxmemory-policy allkeys-lru
+        save 900 1
+  podSecurityContext:
+    runAsUser: 1000
+    fsGroup:   1000
+
+---
+# ── Distributed API Deployment ────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kmrl-api-primary
+  namespace: kmrl-production
+  annotations:
+    deployment.kubernetes.io/revision: "1"
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app:    kmrl-api
+      region: india-south
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge:       2
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app:    kmrl-api
+        region: india-south
+        version: "2.4.1"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "8000"
+        sidecar.istio.io/inject: "true"   # Istio service mesh
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key:      app
+                    operator: In
+                    values:   [kmrl-api]
+              topologyKey: kubernetes.io/hostname
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key:      topology.kubernetes.io/zone
+                    operator: In
+                    values:   [ap-south-1a, ap-south-1b]
+      topologySpreadConstraints:
+        - maxSkew:           1
+          topologyKey:       topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: kmrl-api
+      initContainers:
+        - name: db-migrate
+          image: kmrl/nexusai-api:2.4.1
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - secretRef: {name: kmrl-secrets}
+            - configMapRef: {name: kmrl-config}
+      containers:
+        - name: api
+          image: kmrl/nexusai-api:2.4.1
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - configMapRef: {name: kmrl-config}
+            - configMapRef: {name: kmrl-global-config}
+            - secretRef:    {name: kmrl-secrets}
+          resources:
+            requests: {cpu: "500m",  memory: "512Mi"}
+            limits:   {cpu: "2000m", memory: "2Gi"}
+          readinessProbe:
+            httpGet: {path: /health, port: 8000}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /health, port: 8000}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          startupProbe:
+            httpGet: {path: /health, port: 8000}
+            failureThreshold: 12
+            periodSeconds: 5
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]   # graceful drain
+          volumeMounts:
+            - name: ml-models
+              mountPath: /app/models
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: ml-models
+          persistentVolumeClaim:
+            claimName: ml-models-pvc
+            readOnly: true
+        - name: tmp
+          emptyDir: {}
+      terminationGracePeriodSeconds: 60
+
+---
+# ── Distributed Optimization Worker ──────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kmrl-optimizer-worker
+  namespace: kmrl-production
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kmrl-optimizer-worker
+  template:
+    metadata:
+      labels:
+        app: kmrl-optimizer-worker
+    spec:
+      nodeSelector:
+        workload-type: compute-intensive    # dedicated compute nodes
+      tolerations:
+        - key: "compute"
+          operator: "Equal"
+          value: "intensive"
+          effect: "NoSchedule"
+      containers:
+        - name: worker
+          image: kmrl/nexusai-api:2.4.1
+          command: ["celery", "-A", "app.workers.celery_app", "worker",
+                    "-Q", "optimization", "-c", "2", "--loglevel=warning",
+                    "--max-tasks-per-child=50"]   # prevent memory leak
+          envFrom:
+            - configMapRef: {name: kmrl-config}
+            - secretRef:    {name: kmrl-secrets}
+          resources:
+            requests: {cpu: "2000m",  memory: "2Gi"}
+            limits:   {cpu: "8000m",  memory: "8Gi"}
+          volumeMounts:
+            - name: ml-models
+              mountPath: /app/models
+      volumes:
+        - name: ml-models
+          persistentVolumeClaim: {claimName: ml-models-pvc, readOnly: true}
+
+---
+# ── Cross-Region Kafka MirrorMaker 2 ─────────────────────────────────
+# Mirrors Kafka topics from India South → India West for DR
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaMirrorMaker2
+metadata:
+  name: kmrl-mirror
+  namespace: kmrl-production
+spec:
+  version: 3.6.0
+  replicas: 2
+  connectCluster: kmrl-south
+  clusters:
+    - alias: kmrl-south
+      bootstrapServers: kafka-south.kmrl-production.svc.cluster.local:9092
+    - alias: kmrl-west
+      bootstrapServers: kafka-west.kmrl-dr.svc.cluster.local:9092
+  mirrors:
+    - sourceCluster:  kmrl-south
+      targetCluster:  kmrl-west
+      sourceConnector:
+        config:
+          replication.factor: 1
+          offset-syncs.topic.replication.factor: 1
+          sync.topic.acls.enabled: "false"
+      topicsPattern: "kmrl\\..*"    # mirror all kmrl.* topics
+      groupsPattern: "kmrl-.*"
+
+---
+# ── Velero Backup Schedule ────────────────────────────────────────────
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: kmrl-daily-backup
+  namespace: velero
+spec:
+  schedule: "0 2 * * *"         # 2:00 AM IST (20:30 UTC)
+  template:
+    includedNamespaces: [kmrl-production]
+    includedResources:
+      - persistentvolumeclaims
+      - persistentvolumes
+      - secrets
+      - configmaps
+    storageLocation: kmrl-s3-backup
+    ttl: 720h                    # 30-day retention
+    snapshotVolumes: true
+
+---
+# ── HPA with KEDA (event-driven autoscaling) ─────────────────────────
+# Scale optimizer workers based on Celery queue depth in Redis
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: kmrl-optimizer-scaler
+  namespace: kmrl-production
+spec:
+  scaleTargetRef:
+    name: kmrl-optimizer-worker
+  minReplicaCount: 1
+  maxReplicaCount: 6
+  pollingInterval: 30
+  cooldownPeriod:  120
+  triggers:
+    - type: redis
+      metadata:
+        address: redis-svc.kmrl-production.svc.cluster.local:6379
+        listName: celery:optimization
+        listLength: "3"          # scale up when queue > 3 tasks
+        databaseIndex: "1"
+
+---
+# ── Istio Virtual Service (traffic management) ───────────────────────
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: kmrl-api-vs
+  namespace: kmrl-production
+spec:
+  hosts: ["api.nexusai.kmrl.in"]
+  http:
+    - match:
+        - headers:
+            x-region:
+              exact: india-west
+      route:
+        - destination:
+            host: kmrl-api-svc
+            port: {number: 8000}
+          weight: 100
+    - route:
+        - destination:
+            host: kmrl-api-svc
+            port: {number: 8000}
+          weight: 100
+      timeout: 45s
+      retries:
+        attempts: 3
+        perTryTimeout: 15s
+        retryOn: "gateway-error,connect-failure,retriable-4xx"
+      fault:               # chaos testing hook
+        delay:
+          fixedDelay: 0ms  # set to 100ms to test latency tolerance
+          percentage: {value: 0}
+
+---
+# ── PodDisruptionBudgets ─────────────────────────────────────────────
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kmrl-api-pdb
+  namespace: kmrl-production
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: kmrl-api
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kmrl-optimizer-pdb
+  namespace: kmrl-production
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: kmrl-optimizer-worker
+
+---
+# ── Cluster Autoscaler ────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cluster-autoscaler
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: cluster-autoscaler
+  template:
+    metadata:
+      labels:
+        app: cluster-autoscaler
+    spec:
+      containers:
+        - name: cluster-autoscaler
+          image: registry.k8s.io/autoscaling/cluster-autoscaler:v1.29.0
+          command:
+            - ./cluster-autoscaler
+            - --v=4
+            - --stderrthreshold=info
+            - --cloud-provider=aws
+            - --skip-nodes-with-local-storage=false
+            - --expander=least-waste
+            - --node-group-auto-discovery=asg:tag=k8s.io/cluster-autoscaler/enabled=true
+            - --scale-down-delay-after-add=5m
+            - --scale-down-unneeded-time=10m
+          resources:
+            requests: {cpu: "100m", memory: "300Mi"}
+            limits:   {cpu: "100m", memory: "300Mi"}

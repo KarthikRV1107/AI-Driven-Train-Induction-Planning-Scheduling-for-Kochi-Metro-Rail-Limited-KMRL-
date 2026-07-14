@@ -1,0 +1,319 @@
+/* ============================================================
+   KMRL NexusAI — Global Design System
+   ============================================================ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── CSS Design Tokens ─────────────────────────────────────────── */
+:root {
+  /* Backgrounds */
+  --bg-0: #040608;
+  --bg-1: #080c10;
+  --bg-2: #0d1219;
+  --bg-3: #121922;
+  --bg-4: #1a2332;
+
+  /* Borders */
+  --border: #1e2d40;
+  --border-2: #253548;
+
+  /* Brand */
+  --blue: #3b82f6;
+  --blue-dim: #1d4ed8;
+  --blue-glow: rgba(59, 130, 246, 0.15);
+  --emerald: #10b981;
+  --emerald-glow: rgba(16, 185, 129, 0.12);
+  --amber: #f59e0b;
+  --amber-glow: rgba(245, 158, 11, 0.12);
+  --red: #ef4444;
+  --red-glow: rgba(239, 68, 68, 0.12);
+  --purple: #8b5cf6;
+  --purple-glow: rgba(139, 92, 246, 0.12);
+
+  /* Text */
+  --text-0: #f0f4f8;
+  --text-1: #94a3b8;
+  --text-2: #64748b;
+  --text-3: #334155;
+
+  /* Fonts */
+  --font-sans: var(--font-sans, 'Space Grotesk', sans-serif);
+  --font-mono: var(--font-mono, 'JetBrains Mono', monospace);
+
+  /* Elevation */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.4);
+  --shadow-md: 0 4px 16px rgba(0,0,0,.5);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,.6);
+  --shadow-glow-blue: 0 0 20px rgba(59,130,246,.15);
+  --shadow-glow-green: 0 0 20px rgba(16,185,129,.12);
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  /* Transitions */
+  --transition-fast: 120ms ease;
+  --transition-base: 180ms ease;
+  --transition-slow: 300ms ease;
+}
+
+/* ── Base Reset ────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-size: 13px; }
+
+body {
+  background: var(--bg-0);
+  color: var(--text-0);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--bg-1); }
+::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3a4d63; }
+
+/* ── Typography Utilities ──────────────────────────────────────── */
+.font-mono { font-family: var(--font-mono); }
+.text-muted { color: var(--text-2); }
+.text-dim { color: var(--text-1); }
+
+/* ── Status Colors ─────────────────────────────────────────────── */
+.status-revenue    { color: var(--emerald); }
+.status-standby    { color: var(--amber); }
+.status-ibl        { color: var(--purple); }
+.status-maintenance{ color: var(--red); }
+.status-cleaning   { color: var(--blue); }
+
+/* ── Card Base ─────────────────────────────────────────────────── */
+.card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.card-glass {
+  background: rgba(13,18,25,.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(30,45,64,.8);
+  border-radius: var(--radius-md);
+}
+
+/* ── Glow Borders ──────────────────────────────────────────────── */
+.border-glow-blue   { border-color: rgba(59,130,246,.4); box-shadow: var(--shadow-glow-blue); }
+.border-glow-green  { border-color: rgba(16,185,129,.4); box-shadow: var(--shadow-glow-green); }
+.border-glow-amber  { border-color: rgba(245,158,11,.4); box-shadow: 0 0 20px rgba(245,158,11,.12); }
+.border-glow-red    { border-color: rgba(239,68,68,.4);  box-shadow: 0 0 20px rgba(239,68,68,.12); }
+
+/* ── Pulse Animation ───────────────────────────────────────────── */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: .5; transform: scale(.8); }
+}
+.pulse-dot { animation: pulse-dot 2s infinite; }
+
+/* ── Gradient Text ─────────────────────────────────────────────── */
+.gradient-text-blue {
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Animated entrance ─────────────────────────────────────────── */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-up { animation: fade-up .25s ease forwards; }
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-fade-in { animation: fade-in .2s ease forwards; }
+
+/* ── Skeleton ──────────────────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-2) 25%,
+    var(--bg-3) 50%,
+    var(--bg-2) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 4px;
+}
+
+/* ── Status Badge ──────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+}
+.badge-revenue    { background: rgba(16,185,129,.12);  color: var(--emerald); }
+.badge-standby    { background: rgba(245,158,11,.12);  color: var(--amber); }
+.badge-ibl        { background: rgba(139,92,246,.12);  color: var(--purple); }
+.badge-maintenance{ background: rgba(239,68,68,.12);   color: var(--red); }
+.badge-critical   { background: rgba(239,68,68,.15);   color: var(--red); border: 1px solid rgba(239,68,68,.3); }
+.badge-warning    { background: rgba(245,158,11,.15);  color: var(--amber); border: 1px solid rgba(245,158,11,.3); }
+.badge-info       { background: rgba(59,130,246,.12);  color: var(--blue); }
+
+/* ── Button System ─────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  border: none;
+  outline: none;
+  white-space: nowrap;
+}
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary {
+  background: var(--blue);
+  color: #fff;
+}
+.btn-primary:not(:disabled):hover { background: var(--blue-dim); transform: translateY(-1px); }
+.btn-outline {
+  background: transparent;
+  color: var(--text-1);
+  border: 1px solid var(--border-2);
+}
+.btn-outline:not(:disabled):hover { background: var(--bg-3); color: var(--text-0); }
+.btn-danger {
+  background: rgba(239,68,68,.15);
+  color: var(--red);
+  border: 1px solid rgba(239,68,68,.3);
+}
+.btn-danger:not(:disabled):hover { background: rgba(239,68,68,.25); }
+
+/* ── Progress / Health Bars ────────────────────────────────────── */
+.health-bar {
+  height: 3px;
+  background: var(--bg-3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.health-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width var(--transition-slow);
+}
+
+/* ── Confidence Ring (SVG) ─────────────────────────────────────── */
+.conf-ring { transform: rotate(-90deg); }
+
+/* ── AI Ticker ─────────────────────────────────────────────────── */
+.ai-ticker {
+  background: rgba(59,130,246,.05);
+  border: 1px solid rgba(59,130,246,.15);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--text-1);
+}
+
+/* ── Table ─────────────────────────────────────────────────────── */
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.data-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(30,45,64,.4);
+  font-size: 12px;
+  color: var(--text-0);
+  vertical-align: middle;
+}
+.data-table tr:hover td { background: rgba(255,255,255,.015); }
+.data-table tr:last-child td { border-bottom: none; }
+
+/* ── Input ─────────────────────────────────────────────────────── */
+.input {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  padding: 6px 10px;
+  outline: none;
+  transition: border-color var(--transition-fast);
+  width: 100%;
+}
+.input::placeholder { color: var(--text-3); }
+.input:focus { border-color: var(--blue); }
+
+/* ── Select ────────────────────────────────────────────────────── */
+.select {
+  appearance: none;
+  background: var(--bg-2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2364748b'/%3E%3C/svg%3E") no-repeat right 10px center;
+  background-size: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  padding: 6px 28px 6px 10px;
+  outline: none;
+  cursor: pointer;
+}
+.select:focus { border-color: var(--blue); }
+.select option { background: var(--bg-2); }
+
+/* ── Tooltip ───────────────────────────────────────────────────── */
+[data-tooltip] { position: relative; cursor: default; }
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  border-radius: 5px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--text-0);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  z-index: 999;
+}
+[data-tooltip]:hover::after { opacity: 1; }

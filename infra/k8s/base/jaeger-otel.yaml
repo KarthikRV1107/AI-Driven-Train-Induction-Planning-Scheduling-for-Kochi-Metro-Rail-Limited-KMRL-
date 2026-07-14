@@ -1,0 +1,227 @@
+# ============================================================
+# KMRL NexusAI — Jaeger Distributed Tracing Deployment
+# ============================================================
+
+---
+# Jaeger All-in-One (Development)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger
+  namespace: kmrl-production
+  labels:
+    app: jaeger
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jaeger
+  template:
+    metadata:
+      labels:
+        app: jaeger
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "14269"
+    spec:
+      containers:
+        - name: jaeger
+          image: jaegertracing/all-in-one:1.57
+          ports:
+            - containerPort: 5775   # agent zipkin/thrift compact
+              protocol: UDP
+            - containerPort: 6831   # agent jaeger/thrift compact
+              protocol: UDP
+            - containerPort: 6832   # agent jaeger/thrift binary
+              protocol: UDP
+            - containerPort: 5778   # agent config
+            - containerPort: 16686  # query UI
+            - containerPort: 14268  # collector HTTP
+            - containerPort: 14269  # admin/health
+            - containerPort: 4317   # OTLP gRPC
+            - containerPort: 4318   # OTLP HTTP
+          env:
+            - name: COLLECTOR_OTLP_ENABLED
+              value: "true"
+            - name: SPAN_STORAGE_TYPE
+              value: "elasticsearch"
+            - name: ES_SERVER_URLS
+              value: "http://elasticsearch:9200"
+            - name: ES_INDEX_PREFIX
+              value: "kmrl-traces"
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits:   { cpu: "1000m", memory: "1Gi" }
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 14269
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger
+  namespace: kmrl-production
+  labels:
+    app: jaeger
+spec:
+  selector:
+    app: jaeger
+  ports:
+    - name: ui
+      port: 16686
+      targetPort: 16686
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+    - name: agent-compact
+      port: 6831
+      targetPort: 6831
+      protocol: UDP
+
+---
+# ── OpenTelemetry Collector (Production) ──────────────────────────────
+# Routes: API → OTel Collector → Jaeger + Prometheus + (optional) Datadog
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: kmrl-production
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:0.100.0
+          args: ["--config=/conf/otel-collector-config.yaml"]
+          ports:
+            - containerPort: 4317   # OTLP gRPC
+            - containerPort: 4318   # OTLP HTTP
+            - containerPort: 8889   # Prometheus metrics exporter
+            - containerPort: 13133  # health check
+          volumeMounts:
+            - name: otel-config
+              mountPath: /conf
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits:   { cpu: "1000m", memory: "512Mi" }
+          readinessProbe:
+            httpGet: { path: /, port: 13133 }
+      volumes:
+        - name: otel-config
+          configMap:
+            name: otel-collector-config
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: kmrl-production
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      batch:
+        timeout: 1s
+        send_batch_size: 1024
+
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 400
+        spike_limit_mib: 100
+
+      attributes:
+        actions:
+          - key: environment
+            value: production
+            action: upsert
+          - key: service.version
+            value: "2.4.1"
+            action: upsert
+
+      # Tail sampling — always sample errors and slow requests
+      tail_sampling:
+        decision_wait: 10s
+        num_traces: 100
+        expected_new_traces_per_sec: 10
+        policies:
+          - name: sample-errors
+            type: status_code
+            status_code:
+              status_codes: [ERROR]
+          - name: sample-slow
+            type: latency
+            latency:
+              threshold_ms: 2000
+          - name: sample-base-rate
+            type: probabilistic
+            probabilistic:
+              sampling_percentage: 10
+
+    exporters:
+      otlp/jaeger:
+        endpoint: jaeger:4317
+        tls:
+          insecure: true
+
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+        namespace: kmrl
+        const_labels:
+          environment: production
+
+      logging:
+        loglevel: warn
+
+    service:
+      pipelines:
+        traces:
+          receivers:  [otlp]
+          processors: [memory_limiter, batch, attributes, tail_sampling]
+          exporters:  [otlp/jaeger, logging]
+
+        metrics:
+          receivers:  [otlp]
+          processors: [memory_limiter, batch]
+          exporters:  [prometheus]
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: kmrl-production
+spec:
+  selector:
+    app: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+    - name: prometheus
+      port: 8889
+      targetPort: 8889

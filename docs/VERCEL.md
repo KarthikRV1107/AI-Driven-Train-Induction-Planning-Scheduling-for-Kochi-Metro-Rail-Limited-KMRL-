@@ -25,7 +25,7 @@ Create a new Vercel project and use these settings:
 - Root Directory: `.` if deploying the GitHub repository directly
 - Alternative Root Directory: `frontend` if you prefer deploying only the frontend folder
 - Build Command: `npm run build`
-- Output Directory: leave empty
+- Output Directory: leave empty. Do not set it to `public` for this Next.js app.
 - Install Command: leave default unless your install fails in Vercel
 
 This repository now includes a root `package.json` that forwards Vercel builds to `frontend/`, so importing the repository at its root works correctly.
